@@ -70,6 +70,7 @@ toggle.name = "Switch to light mode"
 # sends the address there as JSON; academa.ai admits this site's origin (`site_url`) alone.
 [project.extra]
 newsletter = "https://academa.ai/api/newsletter"
+social_description = "Blazingly fast 3D animations, for creators and agents. Open source, with Manim's Python API and a Rust GPU core."
 social = [
   { icon = "fontawesome/brands/x-twitter", name = "X", link = "https://x.com/AcademaAI" },
   { icon = "fontawesome/brands/linkedin", name = "LinkedIn", link = "https://www.linkedin.com/company/academa" },
@@ -77,6 +78,14 @@ social = [
   { icon = "fontawesome/brands/instagram", name = "Instagram", link = "https://www.instagram.com/academaai/" },
   { icon = "fontawesome/brands/tiktok", name = "TikTok", link = "https://www.tiktok.com/@academa.ai" },
 ]
+
+# A static sharing card: crawlers receive its absolute URL in the rendered head.
+# Regenerate with `uv run --frozen python -m scripts.showcase.social`.
+[project.extra.social_image]
+path = "images/social-preview.png"
+width = 1200
+height = 630
+alt = "ManimGX by Academa. Blazingly fast 3D animations, for creators and agents. Open source · Python API · Rust + GPU. A colorful three-dimensional trefoil knot on a dark background."
 
 # Setting any extension replaces Zensical's defaults, so every extension is listed.
 [project.markdown_extensions]

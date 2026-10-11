@@ -18,6 +18,10 @@ The notable changes to ManimGX, release by release. The format follows
 
 ## Unreleased
 
+### Added
+
+- Add a preview image and social metadata when sharing website and documentation links.
+
 ### Changed
 
 - Show measured render times in a static benchmark chart.

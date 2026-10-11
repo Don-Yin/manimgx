@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  {% set homepage = page and page.canonical_url and (page.canonical_url | trim("/")) == (config.site_url | trim("/")) %}
+  {% set title = config.site_name %}
+  {% if page and not homepage and page.meta and (page.meta.title | default("")) %}
+    {% set title = page.meta.title ~ " - " ~ config.site_name %}
+  {% elif page and page.title and not homepage %}
+    {% set title = (page.title | striptags) ~ " - " ~ config.site_name %}
+  {% endif %}
+  {% set default_description = config.extra.social_description | default(config.site_description, true) %}
+  {% set description = (page.meta.description | default(default_description, true)) if page and page.meta else default_description %}
+  {% set card = config.extra.social_image %}
+  {% set image = (config.site_url | trim("/")) ~ "/" ~ card.path %}
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ config.site_name | e }}">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:title" content="{{ title | e }}">
+  <meta property="og:description" content="{{ description | e }}">
+  {% if page and page.canonical_url %}
+    <meta property="og:url" content="{{ page.canonical_url | e }}">
+  {% endif %}
+  <meta property="og:image" content="{{ image | e }}">
+  <meta property="og:image:secure_url" content="{{ image | e }}">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="{{ card.width }}">
+  <meta property="og:image:height" content="{{ card.height }}">
+  <meta property="og:image:alt" content="{{ card.alt | e }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@AcademaAI">
+  <meta name="twitter:title" content="{{ title | e }}">
+  <meta name="twitter:description" content="{{ description | e }}">
+  <meta name="twitter:image" content="{{ image | e }}">
+  <meta name="twitter:image:alt" content="{{ card.alt | e }}">
+{% endblock %}
