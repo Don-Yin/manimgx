@@ -21,6 +21,7 @@ The notable changes to ManimGX, release by release. The format follows
 ### Added
 
 - Add a preview image and social metadata when sharing website and documentation links.
+- Credit Academa and the creators in the README.
 
 ### Changed
 

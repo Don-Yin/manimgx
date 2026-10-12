@@ -170,6 +170,8 @@ suitable GPU is available.
 
 ## Community
 
+ManimGX is an open-source project by [Academa](https://academa.ai), created by [Abdullah Geduk](https://geduk.io) and [Sina Atalay](https://sinaatalay.com). We welcome contributions from the community.
+
 Questions, bug reports and feature requests start with an
 [issue](https://github.com/academa-labs/manimgx/issues/new/choose).
 To contribute, read [Contributing](https://github.com/academa-labs/manimgx/blob/main/.github/CONTRIBUTING.md)
