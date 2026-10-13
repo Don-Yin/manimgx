@@ -155,7 +155,7 @@ impl Recipe {
                 // a fully grown path's curve window cannot recover its earlier picture.
                 let wanted = grown.partition_point(|&(first, _, _)| first <= frame);
                 if !player.has(key) || *applied > wanted {
-                    player.evict(&[key]);
+                    player.evict(vec![key]);
                     player.add_path(key, &pack.get(*points)?, &pack.get(*subpaths)?, *centroid_area)?;
                     *applied = 0;
                 }
@@ -274,9 +274,8 @@ impl Take {
                     break;
                 }
                 let keys: Vec<u64> = chunk.iter().map(|&(_, k)| k).collect();
-                player.evict(&keys);
-                for k in &keys {
-                    used.remove(k);
+                for k in player.evict(keys) {
+                    used.remove(&k);
                 }
             }
         }

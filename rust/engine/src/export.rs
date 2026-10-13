@@ -1,7 +1,7 @@
 //! A film's video, natively: each frame drawn, converted to NV12 on the GPU where it changed,
 //! read back and handed to x264 on a thread of its own (see `encode`), muxed into an MP4.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -89,7 +89,7 @@ impl Player {
         gpu.device.poll(wgpu::PollType::Poll).map_err(|e| e.to_string())?;
         let first = export.previous.is_none();
         let kept = lists.map(|capacity| (frames.clone(), capacity));
-        export.pending.push_back(Pending { slot, listed, repeat, first, key, kept, capture });
+        export.pending.push_back(Pending { slot, listed, repeat, first, key, kept, capture, keys: None });
         export.previous = frames.into_iter().last();
         export.drawn += 1;
         Ok(())
@@ -172,6 +172,7 @@ pub(crate) struct Pending {
     first: bool,
     key: bool,
     kept: Option<(Vec<Frame>, u64)>, // a frame composited through the lists, and their capacity
+    keys: Option<Vec<u64>>, // retry dependencies, collected only when eviction asks
     capture: bool, // copy its final successful draw for a simultaneous pixel consumer
 }
 
@@ -225,6 +226,32 @@ impl Export {
             converted: 0,
             start: Instant::now(),
         })
+    }
+
+    /// Keep uploads a queued retry may still draw, in any of its camera views. Cache each
+    /// pending frame's unique keys so repeated pressure does not rescan all its records.
+    pub(crate) fn evictable(&mut self, mut keys: Vec<u64>) -> Vec<u64> {
+        if keys.is_empty() {
+            return keys;
+        }
+        let candidates: HashSet<u64> = keys.iter().copied().collect();
+        let mut blocked = HashSet::new();
+        for pending in &mut self.pending {
+            if let Some((frames, _)) = &pending.kept {
+                let cached = pending.keys.get_or_insert_with(|| {
+                    let mut unique = HashSet::new();
+                    for frame in frames {
+                        for slots in crate::take::slots(bytemuck::cast_slice(&frame.records)) {
+                            unique.extend(slots.into_iter().filter(|&key| key != 0));
+                        }
+                    }
+                    unique.into_iter().collect()
+                });
+                blocked.extend(cached.iter().copied().filter(|key| candidates.contains(key)));
+            }
+        }
+        keys.retain(|key| !blocked.contains(key));
+        keys
     }
 
     /// Read `slot` back once its frame is converted: its `listed` macroblocks, and the lists'

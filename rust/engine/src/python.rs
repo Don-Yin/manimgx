@@ -104,8 +104,8 @@ impl Player {
     }
 
     #[pyo3(name = "evict")]
-    fn py_evict(&mut self, keys: Vec<u64>) {
-        self.evict(&keys);
+    fn py_evict(&mut self, keys: Vec<u64>) -> Vec<u64> {
+        self.evict(keys)
     }
 
     #[pyo3(name = "stored")]
@@ -324,9 +324,9 @@ impl Recorder {
         self.writer.grow(key, points, closed);
     }
 
-    /// Nothing: a take keeps everything (its player keeps what the frames it shows need).
-    fn evict(&mut self, keys: Vec<u64>) {
-        let _ = keys;
+    /// The feeder may forget every key: a take keeps the uploads its frames need itself.
+    fn evict(&mut self, keys: Vec<u64>) -> Vec<u64> {
+        keys
     }
 
     /// (0, 0): a take holds nothing on a GPU (its player keeps what it is sent).

@@ -480,6 +480,7 @@ class Sink:
         self.kinds: dict[int, str] = {}  # what each key was uploaded as
         self.vertices: dict[int, int] = {}  # a mesh's vertex count, as sent
         self.failing: set[str] = set()
+        self.protected: set[int] = set()  # resources retained by queued frames
 
     def _add(self, kind: str, key: int, parts: list[Part], *args: object) -> None:
         if kind in self.failing:
@@ -522,14 +523,15 @@ class Sink:
     def grow_path(self, key: int, points: bytes, closed: bool = False) -> None:
         raise AssertionError("no growing paths here")
 
-    def evict(self, keys: list[int]) -> None:
+    def evict(self, keys: list[int]) -> list[int]:
         if "evict" in self.failing:
             self.failing.discard("evict")
             raise Injected("evict")
-        for key in keys:
+        accepted = self.engine.evict([key for key in keys if key not in self.protected])
+        for key in accepted:
             assert key in self.resident, f"{key:x} evicted, never resident"
             del self.resident[key]
-        self.engine.evict(keys)
+        return accepted
 
     def stored(self) -> tuple[int, int]:
         return self.engine.stored()
@@ -844,6 +846,12 @@ class Residency(RuleBasedStateMachine):
             self.feeder.sweep()
         self.sink.failing.discard("evict")
 
+    @rule(which=st.lists(st.integers(0, 63), max_size=6))
+    def pending(self, which: list[int]) -> None:
+        """Queued frames may retain some resources until a later sweep."""
+        keys = list(self.sink.resident)
+        self.sink.protected = {keys[i % len(keys)] for i in which} if keys else set()
+
     @rule(kind=st.sampled_from(["path", "points", "mesh", "rows", "texture", "evict"]))
     def fail_next(self, kind: str) -> None:
         self.sink.failing.add(kind)
@@ -900,6 +908,7 @@ class Residency(RuleBasedStateMachine):
         go of is collected: a key in flight (a failed upload's) holds its input until then."""
         self.held, self.pool = [], []
         self.sink.failing.clear()
+        self.sink.protected.clear()
         self.feeder.frame(
             self.camera, []
         )  # a frame of nothing: the last shown holds nothing

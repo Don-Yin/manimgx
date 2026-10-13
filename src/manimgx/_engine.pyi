@@ -61,8 +61,8 @@ class Player:
         """Append curves (float64 control points, four per curve) to a path's last subpath;
         `closed`: whether it now ends where it begins."""
 
-    def evict(self, keys: Sequence[int]) -> None:
-        """Forget shapes, brushes and textures no frame shows any more."""
+    def evict(self, keys: Sequence[int]) -> list[int]:
+        """Forget resources except those needed by queued export retries; return the accepted keys."""
 
     def stored(self) -> tuple[int, int]:
         """(bytes in the store's arrays, of which dead): what the arrays sent to the GPU hold."""
@@ -186,7 +186,8 @@ class Recorder:
         self, id: int, width: int, height: int, rgbe: bytes
     ) -> None: ...
     def grow_path(self, key: int, points: bytes, closed: bool = False) -> None: ...
-    def evict(self, keys: Sequence[int]) -> None: ...
+    def evict(self, keys: Sequence[int]) -> list[int]:
+        """Return all keys: the feeder may forget uploads retained by the take itself."""
     def stored(self) -> tuple[int, int]:
         """(0, 0): a take holds nothing on a GPU."""
 

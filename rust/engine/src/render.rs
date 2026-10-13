@@ -2667,11 +2667,17 @@ impl Player {
     }
 
     #[cfg(any(feature = "python", feature = "player"))]
-    /// Forget shapes, brushes and textures no frame shows any more (unknown keys are ignored);
-    /// the shapes' space is reused once most of the store is dead.
-    pub(crate) fn evict(&mut self, keys: &[u64]) {
-        self.store.evict(keys);
-        for key in keys {
+    /// Forget shapes, brushes and textures, except those queued export retries still need.
+    /// Return the accepted keys (unknown keys are ignored); the shapes' space is reused once
+    /// most of the store is dead. Refused keys may be offered again after their frames retire.
+    pub(crate) fn evict(&mut self, keys: Vec<u64>) -> Vec<u64> {
+        #[cfg(feature = "export")]
+        let keys = match &mut self.export {
+            Some(export) => export.evictable(keys),
+            None => keys,
+        };
+        self.store.evict(&keys);
+        for key in &keys {
             // a texture goes with its key (key 0, the white image, is never a texture's)
             if *key != 0 {
                 self.images.remove(key);
@@ -2679,6 +2685,7 @@ impl Player {
                 self.image_groups.remove(key);
             }
         }
+        keys
     }
 
     #[cfg(feature = "python")]

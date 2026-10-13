@@ -576,7 +576,8 @@ class Feeder:
     def sweep(self, pinned: Sequence[bytes] = (), *, pressed: bool = False) -> None:
         """Evict what no frame has shown for KEEP frames (frames mark what they show every MARK
         frames; the film holds back at most one frame). Memory pressure keeps only the latest
-        frame and the records pinned by the caller, including every pending camera view."""
+        frame and the records pinned by the caller, including every pending camera view.
+        The player also retains resources its queued export retries still need."""
         stored, dead = self.player.stored()
         pressed |= stored - dead + sum(self.texture_bytes.values()) > BUDGET
         if self.frames - self.swept < SWEEP and not pressed:
@@ -592,7 +593,11 @@ class Feeder:
         # it is only forgotten
         resident = [k for k in stale if self.sizes.get(k, -1) != -1]
         if resident:
-            self.player.evict(resident)
+            accepted = set(self.player.evict(resident))
+            blocked = set(resident) - accepted
+            stale = [key for key in stale if key not in blocked]
+        if not stale:
+            return
         self.evictions += 1
         gone = set(stale)
         for key in stale:
