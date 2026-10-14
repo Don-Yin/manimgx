@@ -5,10 +5,12 @@
 // Out: {status} while it boots (what it waits for); {engine: {js, wasm, fonts}} once (the
 // player: its JS and WebAssembly, and the fonts its face is set in); then each film's take stream,
 // {film, feed}: its takes, and between them the director's notes (the file's scenes, an error),
-// which the player reads like every other note.
+// which the player reads like every other note. Beside the stream, for the page's element:
+// {film, frame} when a run has made its first frame, {film, error} when a run failed (the same
+// error as the note the player shows).
 
 import { message } from "./protocol.js";
-import type { Boot, FromDirector, Run, ToDirector } from "./protocol.js";
+import type { Boot, FromDirector, Run, SceneError, ToDirector } from "./protocol.js";
 
 interface PythonValue {
   toJs(): unknown;
@@ -30,11 +32,19 @@ interface PyodideModule {
   loadPyodide(options: { indexURL: string }): Promise<Pyodide>;
 }
 
+/** What a film's run tells its page, and Python calls: the take's bytes, that the run has made
+ *  its first frame, and why it failed (`line`: none if Python knows of none). */
+interface Channel {
+  feed(bytes: Uint8Array<ArrayBuffer>): void;
+  frame(): void;
+  fail(message: string, type: string, trace: string, line: number | undefined): void;
+}
+
 type Runner = (
   film: number,
   source: string,
   scene: string | null,
-  send: (bytes: Uint8Array<ArrayBuffer>) => void,
+  channel: Channel,
   tried: string[],
 ) => string | null;
 
@@ -107,6 +117,17 @@ async function drain(): Promise<void> {
       queue.delete(film);
       const feed = (bytes: Uint8Array<ArrayBuffer>): void =>
         send({ film, feed: bytes.buffer }, [bytes.buffer]);
+      // A failure goes to the player in the film's note stream, shown over the last picture,
+      // and to the page's element as it is.
+      const fail = (error: SceneError): void => {
+        feed(note(JSON.stringify({ error })));
+        send({ film, error });
+      };
+      const channel: Channel = {
+        feed,
+        frame: () => send({ film, frame: true }),
+        fail: (text, type, trace, line) => fail({ message: text, type, line: line ?? null, trace }),
+      };
       try {
         if (run === null) {
           drop(film);
@@ -116,14 +137,15 @@ async function drain(): Promise<void> {
         await py.loadPackagesFromImports(source); // the scene's Pyodide package imports
         // A missing module is installed once, then the ordinary runner reports any failure.
         const tried: string[] = [];
-        for (let missing; (missing = runner(film, source, scene ?? null, feed, tried));) {
+        for (let missing; (missing = runner(film, source, scene ?? null, channel, tried));) {
           tried.push(missing);
           await micropip.install(missing).catch(() => {});
         }
       } catch (error) {
-        // Loading and calling Python can fail outside its own scene error boundary. Keep the
-        // error in this film's ordinary note stream so another film or edit can still run.
-        feed(note(JSON.stringify({ error: { message: message(error), type: "Error" } })));
+        // Loading and calling Python can fail outside its own scene error boundary. Report it
+        // as this film's error so another film or edit can still run.
+        const text = message(error);
+        fail({ message: text, type: "Error", line: null, trace: text });
       }
       await new Promise<void>((resolve) => setTimeout(resolve)); // let newer runs in
     }
@@ -144,8 +166,8 @@ from manimgx.scene import Scene
 
 FILMS = Path("/home/pyodide/films")
 
-def run(film, source, name, send, tried):
-    out = lambda data: send(to_js(data))
+def run(film, source, name, channel, tried):
+    out = lambda data: channel.feed(to_js(data))
     path = FILMS / str(film) / "scene.py"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,13 +186,23 @@ def run(film, source, name, send, tried):
             raise ValueError("the source defines no scene (a subclass of manimgx.Scene)")
         kind = scenes[names.index(name)] if name in names else scenes[0]
         out(_engine.note(json.dumps({"scenes": names, "scene": kind.__name__})))
-        kind().render(take=out)
+        scene = kind()
+        framed = False
+
+        def take(data):
+            nonlocal framed
+            out(data)
+            if not framed and scene.film.frame_count:
+                framed = True
+                channel.frame()  # the film has its first frame
+
+        scene.render(take=take)
     except ModuleNotFoundError as error:
         if error.name and error.name not in list(tried):
             return error.name  # installed, then run again
-        report(out, path, error)
+        report(channel, path, error)
     except Exception as error:
-        report(out, path, error)
+        report(channel, path, error)
 
 def drop(film):
     path = FILMS / str(film) / "scene.py"
@@ -183,12 +215,12 @@ def drop(film):
     if path.parent.exists():
         shutil.rmtree(path.parent)
 
-def report(out, path, error):
+def report(channel, path, error):
     # the scene's own frames, not manimgx's or Pyodide's
     frames = [f for f in traceback.extract_tb(error.__traceback__) if f.filename == str(path)]
     trace = "".join(traceback.format_list(frames) + traceback.format_exception_only(error))
     line = frames[-1].lineno if frames else getattr(error, "lineno", None)
-    out(_engine.note(json.dumps({"error": {"message": str(error), "type": type(error).__name__, "trace": trace, "line": line}})))
+    channel.fail(str(error), type(error).__name__, trace, line)
 
 run
 `;

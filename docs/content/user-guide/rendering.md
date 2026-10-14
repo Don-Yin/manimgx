@@ -187,8 +187,34 @@ through your bundler, and put a scene in a `<manimgx-player>`:
 </manimgx-player>
 ```
 
+A page can also give the player a scene from JavaScript: set its `source` to the Python of
+a scene, and it makes the film again, keeping its place. The player says how the scene fares
+as a video element does: `loadeddata` fires when a run of the scene has made its first
+frame, and `error` when a run fails, and then `player.error` holds the error's `message`,
+its `type`, its `line` in your source (or `null`) and its `trace`:
+
+```js
+const player = document.querySelector("manimgx-player");
+player.addEventListener("error", () => {
+  console.error(`line ${player.error.line}: ${player.error.message}`);
+});
+player.source = code; // the Python of a scene
+```
+
 The player has the keys of the preview window. The first video on a page downloads
 Python ([Pyodide](https://pyodide.org)) and ManimGX, about 26 MB; the browser keeps them
-for later. It needs WebGPU: Chrome and Edge 113 or later, or Safari 26. Two things don't
-work in the browser yet: shapes made from other shapes, such as `Union`, and Chinese,
-Japanese and Korean text.
+for later. It needs WebGPU, on a GPU that blends float32 targets: Chrome and Edge on
+Windows, macOS and ChromeOS, and on many Android phones, or Safari 26 on macOS 26 and
+iOS 26. Firefox blends float32 targets from version 158. A browser that lacks any of it
+downloads nothing: the player says what it lacks, and fires `failure`, with the reason in
+`player.failure`; `unsupported()`, from the same package, tells a page before it makes a
+player:
+
+```js
+import { unsupported } from "manimgx";
+
+const lacking = await unsupported(); // null, or { reason: "webgpu" | "adapter" | "features" }
+```
+
+Two things don't work in the browser yet: shapes made from other shapes, such as `Union`,
+and Chinese, Japanese and Korean text.

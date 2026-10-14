@@ -10,7 +10,29 @@ from typing import cast
 
 import pytest
 
-Run = Callable[[int, str, str | None, Callable[[bytes], None], list[str]], str | None]
+
+class Channel:
+    """What the worker gives a run, as it gives it to Pyodide: the take's bytes, that the run
+    has made its first frame, and why it failed."""
+
+    def __init__(self) -> None:
+        self.told: list[str] = []  # which of the three it told, in order
+        self.out: list[bytes] = []  # the take's bytes
+        self.failures: list[tuple[str, str, str, int | None]] = []  # why, as told
+
+    def feed(self, data: bytes) -> None:
+        self.told.append("feed")
+        self.out.append(data)
+
+    def frame(self) -> None:
+        self.told.append("frame")
+
+    def fail(self, message: str, kind: str, trace: str, line: int | None) -> None:
+        self.told.append("fail")
+        self.failures.append((message, kind, trace, line))
+
+
+Run = Callable[[int, str, str | None, Channel, list[str]], str | None]
 Drop = Callable[[int], None]
 
 
@@ -61,12 +83,12 @@ def test_film_drop_owns_its_source_cache_and_module(
     runner: tuple[Run, Drop], tmp_path: Path
 ) -> None:
     run, drop = runner
-    out: list[bytes] = []
-    assert run(1, SCENE, None, out.append, []) is None
-    assert out[-1] == b"one"
+    channel = Channel()
+    assert run(1, SCENE, None, channel, []) is None
+    assert channel.out[-1] == b"one"
     first = tmp_path / "1" / "scene.py"
     assert linecache.getline(str(first), 2) == "from pathlib import Path\n"
-    assert run(2, SCENE, None, out.append, []) is None
+    assert run(2, SCENE, None, channel, []) is None
     second = sys.modules["scene"]
     drop(1)
     drop(1)  # a repeated detach does not own any new work
@@ -94,11 +116,11 @@ def test_same_film_edits_preserve_files_and_execute_the_supplied_source(
 
     monkeypatch.setattr(Path, "write_text", write)
     monkeypatch.setattr(sys, "dont_write_bytecode", False)
-    out: list[bytes] = []
-    run(1, SCENE, None, out.append, [])
-    assert out[-1] == b"one"
-    run(1, SCENE.replace("one", "two"), None, out.append, [])
-    assert out[-1] == b"two"
+    channel = Channel()
+    run(1, SCENE, None, channel, [])
+    assert channel.out[-1] == b"one"
+    run(1, SCENE.replace("one", "two"), None, channel, [])
+    assert channel.out[-1] == b"two"
     assert (tmp_path / "1" / "cache.txt").read_text(encoding="utf-8") == "onetwo"
 
 
@@ -106,13 +128,124 @@ def test_failed_and_retrying_films_release_their_source_on_drop(
     runner: tuple[Run, Drop], tmp_path: Path
 ) -> None:
     run, drop = runner
-    out: list[bytes] = []
-    assert run(1, "raise ValueError('bad scene')", None, out.append, []) is None
-    assert out
-    assert run(
-        2, "import nonexistent_browser_scene_dependency", None, out.append, []
-    ) == ("nonexistent_browser_scene_dependency")
+    channel = Channel()
+    assert run(1, "raise ValueError('bad scene')", None, channel, []) is None
+    assert channel.told == ["fail"]
+    assert run(2, "import nonexistent_browser_scene_dependency", None, channel, []) == (
+        "nonexistent_browser_scene_dependency"
+    )
     for film in [1, 2]:
         assert (tmp_path / str(film) / "scene.py").is_file()
         drop(film)
         assert not (tmp_path / str(film)).exists()
+
+
+# Scenes that really make a take, to see what a run tells its page of it.
+MOVING = """
+import manimgx as m
+
+class Moving(m.Scene):
+    def construct(self):
+        circle = m.Circle()
+        self.add(circle)
+        self.play(circle.animate.shift(m.RIGHT), run_time=0.5)
+        self.wait(0.2)
+"""
+
+FAILS_FIRST = """
+import manimgx as m
+
+class Fails(m.Scene):
+    def construct(self):
+        self.play(m.Create(missing_name))
+"""
+
+FAILS_LATER = """
+import manimgx as m
+
+class Fails(m.Scene):
+    def construct(self):
+        circle = m.Circle()
+        self.play(m.Create(circle), run_time=0.3)
+        missing_name
+"""
+
+
+def test_a_run_tells_when_it_has_made_its_first_frame_once(
+    runner: tuple[Run, Drop],
+) -> None:
+    run, _ = runner
+    channel = Channel()
+    assert run(1, MOVING, None, channel, []) is None
+    told = channel.told
+    # after the scenes note and the take's first bytes, once, and then the take goes on
+    assert told[:3] == ["feed", "feed", "frame"]
+    assert told.count("frame") == 1
+    assert told.count("fail") == 0
+    assert told[-1] == "feed"
+
+
+def test_a_run_that_fails_before_any_frame_tells_why_and_no_frame(
+    runner: tuple[Run, Drop], tmp_path: Path
+) -> None:
+    run, _ = runner
+    channel = Channel()
+    assert run(1, FAILS_FIRST, None, channel, []) is None
+    # the scenes note, the take's start and end (a failed one), then the error
+    assert channel.told == ["feed", "feed", "fail"]
+    [(message, kind, trace, line)] = channel.failures
+    assert (message, kind, line) == (
+        "name 'missing_name' is not defined",
+        "NameError",
+        6,
+    )
+    path = tmp_path / "1" / "scene.py"
+    # the scene's own frames, as the player shows them, then the error
+    assert trace.startswith(
+        f'  File "{path}", line 6, in construct\n    self.play(m.Create(missing_name))\n'
+    )
+    assert "NameError: name 'missing_name' is not defined" in trace
+
+
+def test_a_run_that_fails_after_its_first_frame_tells_the_frame_then_why(
+    runner: tuple[Run, Drop],
+) -> None:
+    run, _ = runner
+    channel = Channel()
+    assert run(1, FAILS_LATER, None, channel, []) is None
+    told = channel.told
+    assert told.count("frame") == 1
+    assert told.index("frame") < told.index("fail") == len(told) - 1
+    [(message, kind, _, line)] = channel.failures
+    assert (message, kind, line) == (
+        "name 'missing_name' is not defined",
+        "NameError",
+        8,
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "kind", "line"),
+    [
+        (
+            "def construct(:\n",
+            "SyntaxError",
+            1,
+        ),  # in no frame of the scene's: its own line
+        ("import manimgx as m\nraise ValueError('bad')\n", "ValueError", 2),
+        (
+            "import manimgx as m\nx = m.Scene\n",
+            "ValueError",
+            None,
+        ),  # it defines no scene
+    ],
+)
+def test_a_run_tells_the_line_it_failed_at_if_it_has_one(
+    runner: tuple[Run, Drop], source: str, kind: str, line: int | None
+) -> None:
+    run, _ = runner
+    channel = Channel()
+    assert run(1, source, None, channel, []) is None
+    assert channel.told == ["fail"]
+    [(_, error, _, at)] = channel.failures
+    assert (error, at) == (kind, line)

@@ -33,3 +33,14 @@ const player = await Bun.build({
   },
 });
 if (!player.success) throw new AggregateError(player.logs, "Could not build the player");
+
+// The player loads the engine's JavaScript from a blob URL it makes in the page. A bundler that
+// reads that `import(url)` cannot resolve it, and webpack turns it into "Cannot find module".
+// Bun drops the comment that tells them to leave it alone, so it is put back.
+const built = player.outputs[0];
+if (!built) throw new Error("The player build produced no JavaScript");
+const dynamicImport = /\bimport\(([\w$]+)\)/g;
+const code = await built.text();
+const imports = [...code.matchAll(dynamicImport)].length;
+if (imports !== 1) throw new Error(`The player should import the engine once, not ${imports}`);
+await Bun.write(built.path, code.replace(dynamicImport, "import(/* webpackIgnore: true */ $1)"));

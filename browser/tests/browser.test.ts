@@ -10,9 +10,15 @@ const packageJSON = (await Bun.file(new URL("../package.json", import.meta.url))
 
 // Each page gets its own globals and module, just as separate browser tabs do. Loading the
 // emitted file also catches packaging mistakes that importing the TypeScript source misses.
+// The GPU a page's browser offers: none (no WebGPU), WebGPU without an adapter, or an adapter with
+// these features (by default, what the engine needs).
+type Gpu = "no webgpu" | "no adapter" | readonly string[];
+const FEATURES = ["float32-blendable", "depth32float-stencil8"];
+
 async function page(
   script: string | null = null,
   failAt: "import" | "wasm" | "fonts" | null = null,
+  gpu: Gpu = FEATURES,
 ) {
   const tasks = new Map<number, () => void>();
   const frames = new Map<number, () => void>();
@@ -22,6 +28,7 @@ async function page(
   const workers: Director[] = [];
   const natives: NativePlayer[] = [];
   const observers: Observer[] = [];
+  const adapterRequests: unknown[] = [];
   const document = Object.assign(new EventTarget(), { fullscreenElement: null });
   class Observer {
     targets = new Set<unknown>();
@@ -132,10 +139,24 @@ async function page(
   const context = createContext({
     HTMLElement: Element,
     AbortController,
+    Event,
+    ErrorEvent,
     document,
     ResizeObserver: Observer,
     IntersectionObserver: Observer,
-    navigator: { platform: "Linux" },
+    navigator: {
+      platform: "Linux",
+      ...(gpu === "no webgpu"
+        ? {}
+        : {
+            gpu: {
+              requestAdapter: async (options: unknown) => {
+                adapterRequests.push(options);
+                return gpu === "no adapter" ? null : { features: new Set(gpu) };
+              },
+            },
+          }),
+    },
     customElements: {
       get: (name: string) => elements.get(name),
       define: (name: string, value: unknown) => elements.set(name, value),
@@ -197,17 +218,28 @@ async function page(
     workers,
     natives,
     observers,
+    adapterRequests,
     document,
     timers: tasks,
     frames,
     waiting,
     canvas,
-    flush: () => {
+    // The page's pending tasks run, and what they began settles: a player checks the browser's GPU
+    // before it makes its director.
+    flush: async () => {
       const batch = [...tasks.values()];
       tasks.clear();
       batch.forEach((task) => task());
+      await settle();
     },
   };
+}
+
+// What the embedded worker's Python runner is given (see director.ts).
+interface Channel {
+  feed(bytes: Uint8Array): void;
+  frame(): void;
+  fail(message: string, type: string, trace: string, line: number | undefined): void;
 }
 
 async function settle() {
@@ -259,7 +291,7 @@ describe("published browser module", () => {
     state.api.settings.pyodide = "https://example.test/python/";
     state.api.settings.manimgx = "https://example.test/manimgx.whl";
     expect(state.workers).toHaveLength(0);
-    state.flush();
+    await state.flush();
     const director = state.workers[0]!;
     expect(director.options).toEqual({ type: "module" });
     expect(director.sent).toEqual([
@@ -284,7 +316,7 @@ describe("published browser module", () => {
     });
     player.disconnectedCallback();
     player.connectedCallback();
-    state.flush();
+    await state.flush();
     expect(state.workers).toHaveLength(1);
     expect(director.sent).toHaveLength(6);
   });
@@ -294,7 +326,7 @@ describe("published browser module", () => {
     const player = new state.api.ManimgxPlayer();
     player.source = "first";
     player.connectedCallback();
-    state.flush();
+    await state.flush();
     const director = state.workers[0]!;
     await director.onmessage!({ data: { engine: { js: "", wasm: new Uint8Array(), fonts: [] } } });
     await settle();
@@ -328,7 +360,7 @@ describe("published browser module", () => {
 
     Object.defineProperty(player, "isConnected", { value: true });
     player.connectedCallback();
-    state.flush();
+    await state.flush();
     await settle();
     expect(state.natives).toHaveLength(2);
     expect(player.currentTime).toBe(1.25);
@@ -351,7 +383,7 @@ describe("published browser module", () => {
     await director.onmessage!({ data: { film: 2, feed: new Uint8Array([255]).buffer } });
     expect(state.natives[1]!.frees).toBe(1);
     expect(state.observers.every((observer) => observer.targets.size === 0)).toBe(true);
-    expect(state.waiting.textContent).toBe("decode failed");
+    expect(state.waiting.textContent).toBe("ManimGX stopped: decode failed");
   });
 
   test("disconnecting during boot does not create an orphan native player", async () => {
@@ -359,7 +391,7 @@ describe("published browser module", () => {
     const player = new state.api.ManimgxPlayer();
     player.source = "first";
     player.connectedCallback();
-    state.flush();
+    await state.flush();
     Object.defineProperty(player, "isConnected", { value: false, writable: true });
     player.disconnectedCallback();
     await state.workers[0]!.onmessage!({
@@ -369,7 +401,7 @@ describe("published browser module", () => {
     expect(state.natives).toHaveLength(0);
     Object.defineProperty(player, "isConnected", { value: true });
     player.connectedCallback();
-    state.flush();
+    await state.flush();
     await settle();
     expect(state.natives).toHaveLength(1);
   });
@@ -378,10 +410,10 @@ describe("published browser module", () => {
     const state = await page();
     const player = new state.api.ManimgxPlayer();
     player.connectedCallback();
-    state.flush();
+    await state.flush();
     player.disconnectedCallback();
     player.connectedCallback();
-    state.flush();
+    await state.flush();
     await state.workers[0]!.onmessage!({
       data: { engine: { js: "", wasm: new Uint8Array(), fonts: [] } },
     });
@@ -391,16 +423,18 @@ describe("published browser module", () => {
   });
 
   test.each(["import", "wasm", "fonts", "worker", "boot"] as const)(
-    "%s initialization failure is terminal for existing and future players",
+    "%s initialization failure is final for its players, and a later player begins again",
     async (failure) => {
       const state = await page(
         null,
         ["worker", "boot"].includes(failure) ? null : (failure as "import" | "wasm" | "fonts"),
       );
       const player = new state.api.ManimgxPlayer();
+      const failures: (BrowserAPI.Failure | null)[] = [];
+      player.addEventListener("failure", () => failures.push(player.failure));
       player.source = "first";
       player.connectedCallback();
-      state.flush();
+      await state.flush();
       const director = state.workers[0]!;
       await director.onmessage!({ data: { film: 1, feed: new Uint8Array([1]).buffer } });
       if (failure === "worker") director.onerror!({ message: "worker failed" });
@@ -412,16 +446,17 @@ describe("published browser module", () => {
       await settle();
       expect(state.waiting.textContent).toContain(`${failure} failed`);
       expect(director.terminations).toBe(1);
+      // Python that would not start, or an engine that would not come up
+      const reason = ["worker", "boot"].includes(failure) ? "python" : "engine";
+      expect(failures).toEqual([{ reason, message: state.waiting.textContent }]);
+      expect(Object.isFrozen(player.failure)).toBe(true);
       const sent = director.sent.length;
       player.source = "cannot run";
-      const later = new state.api.ManimgxPlayer();
-      later.source = "cannot run either";
-      later.connectedCallback();
-      state.flush();
-      await settle();
+      player.disconnectedCallback();
+      player.connectedCallback();
+      await state.flush();
       expect(director.sent).toHaveLength(sent);
-      expect(state.natives).toHaveLength(0);
-      expect(state.waiting.textContent).toContain(`${failure} failed`);
+      expect(state.workers).toHaveLength(1);
       // Even a late successful boot message cannot resurrect this failed runtime or replay
       // bytes that arrived before initialization failed.
       await director.onmessage!({
@@ -429,13 +464,103 @@ describe("published browser module", () => {
       });
       await settle();
       expect(state.natives).toHaveLength(0);
+      expect(failures).toHaveLength(1);
+      // A player made later begins again, with a director of its own: the download may work now.
+      const later = new state.api.ManimgxPlayer();
+      later.source = "runs again";
+      later.connectedCallback();
+      await state.flush();
+      expect(later.failure).toBeNull();
+      expect(state.workers).toHaveLength(2);
+      expect(director.sent).toHaveLength(sent);
+      expect(state.workers[1]!.sent.at(-1)).toEqual({
+        film: 2,
+        run: { source: "runs again", scene: null },
+      });
     },
   );
+
+  test.each([
+    ["no webgpu", "webgpu", "This browser has no WebGPU, which ManimGX draws with."],
+    ["no adapter", "adapter", "WebGPU found no GPU here for ManimGX to draw with."],
+    [
+      ["depth32float-stencil8", "shader-f16"],
+      "features",
+      "This GPU lacks what ManimGX draws with: WebGPU's float32-blendable.",
+    ],
+    [
+      [],
+      "features",
+      "This GPU lacks what ManimGX draws with: WebGPU's float32-blendable and depth32float-stencil8.",
+    ],
+  ] as const)(
+    "a browser with %p cannot play, and downloads nothing to find out",
+    async (gpu, reason, said) => {
+      const state = await page(null, null, gpu);
+      const player = new state.api.ManimgxPlayer();
+      const failures: (BrowserAPI.Failure | null)[] = [];
+      player.addEventListener("failure", () => failures.push(player.failure));
+      player.source = "a scene";
+      player.connectedCallback();
+      await state.flush();
+      const failure: BrowserAPI.Unsupported =
+        reason === "features"
+          ? {
+              reason,
+              message: said,
+              missing: FEATURES.filter((f) => !(gpu as readonly string[]).includes(f)),
+            }
+          : { reason, message: said };
+      expect(failures).toEqual([failure]);
+      expect(state.waiting.textContent).toBe(said);
+      expect(await state.api.unsupported()).toEqual(failure);
+      // no director, so no Python: nothing downloads, for this player or a later one
+      const later = new state.api.ManimgxPlayer();
+      later.connectedCallback();
+      await state.flush();
+      expect(later.failure).toEqual(failure);
+      expect(state.workers).toHaveLength(0);
+      expect(state.blobs).toHaveLength(0);
+    },
+  );
+
+  test("asks for the GPU the engine draws with, once for the page", async () => {
+    const state = await page();
+    expect(await state.api.unsupported()).toBeNull();
+    for (const _ of [1, 2]) {
+      const player = new state.api.ManimgxPlayer();
+      player.source = "a scene";
+      player.connectedCallback();
+    }
+    await state.flush();
+    expect(state.adapterRequests).toEqual([{ powerPreference: "high-performance" }]);
+    expect(state.workers).toHaveLength(1);
+  });
+
+  test("checks the GPU for exactly what the engine asks of its adapter", async () => {
+    // The engine refuses an adapter that lacks float32 blending or float32 depth with stencil
+    // (rust/engine/src/render.rs, `adapter`); the player checks the same, in WebGPU's names.
+    const render = await readFile(
+      new URL("../../rust/engine/src/render.rs", import.meta.url),
+      "utf8",
+    );
+    const asks = /async fn adapter\(instance: &wgpu::Instance\)[\s\S]*?\n}\n/.exec(render)?.[0];
+    expect(asks).toBeDefined();
+    expect(asks!.match(/return Err\(/g)).toHaveLength(2);
+    expect(asks).toContain("if !blends_float32(&adapter)");
+    expect(asks).toContain(
+      "if !adapter.features().contains(wgpu::Features::DEPTH32FLOAT_STENCIL8)",
+    );
+    const state = await page(null, null, []);
+    expect(await state.api.unsupported()).toMatchObject({
+      missing: ["float32-blendable", "depth32float-stencil8"],
+    });
+  });
 
   test("the embedded worker coalesces edits and isolates film failures", async () => {
     const state = await page();
     new state.api.ManimgxPlayer().connectedCallback();
-    state.flush();
+    await state.flush();
     const source = await state.blobs[0]!.text();
     const messages: { data: unknown; transfer: unknown[] }[] = [];
     const imports: string[] = [];
@@ -455,13 +580,17 @@ describe("published browser module", () => {
       film: number,
       source: string,
       scene: string | null,
-      send: (bytes: Uint8Array) => void,
+      channel: Channel,
       tried: string[],
     ) => {
       if (source === "broken runner") throw new Error("Python worker failure");
       runs.push({ film, source, scene, tried: [...tried] });
       if (source === "latest" && !tried.includes("networkx")) return "networkx";
-      send(new Uint8Array([film]));
+      channel.feed(new Uint8Array([film]));
+      if (source.startsWith("frame")) channel.frame();
+      if (source === "frame then fail") channel.fail("bad name", "NameError", "trace of 7", 7);
+      if (source === "fail without a line")
+        channel.fail("bad syntax", "SyntaxError", "trace", undefined);
       return null;
     };
     const pyodide = {
@@ -589,11 +718,15 @@ describe("published browser module", () => {
       send({ film: 3, run: { source, scene: null } });
       send({ film: 4, run: { source: "next film", scene: null } });
       await settle();
-      const failed = messages.at(-1)!.data as { film: number; feed: ArrayBuffer };
-      expect(failed.film).toBe(3);
-      expect(JSON.parse(new TextDecoder().decode(failed.feed))).toEqual({
-        error: { message: error, type: "Error" },
-      });
+      // the failure goes to the player as a note, and to the page's element as it is
+      const [note, said] = messages.slice(-2).map(({ data }) => data) as [
+        { film: number; feed: ArrayBuffer },
+        { film: number; error: unknown },
+      ];
+      const fault = { message: error, type: "Error", line: null, trace: error };
+      expect(note.film).toBe(3);
+      expect(JSON.parse(new TextDecoder().decode(note.feed))).toEqual({ error: fault });
+      expect(said).toEqual({ film: 3, error: fault });
       tasks.splice(0).forEach((task) => task());
       await settle();
       expect(runs.at(-1)).toMatchObject({ film: 4, source: "next film" });
@@ -618,12 +751,52 @@ describe("published browser module", () => {
     await settle();
     expect(drops.at(-1)).toBe(6);
     expect(runs.at(-1)).toMatchObject({ film: 7, source: "new connection" });
+
+    // Besides the take, a run's channel tells the page that the run has made its first frame, and
+    // why it failed: to the player too, in the film's notes, and to the page's element as it is
+    // (a Python error without a line has none).
+    const told = async (source: string) => {
+      tasks.splice(0).forEach((task) => task());
+      await settle();
+      messages.length = 0;
+      send({ film: 8, run: { source, scene: null } });
+      await settle();
+      return messages.map(({ data }): Record<string, unknown> => {
+        const { feed, ...said } = data as Record<string, unknown> & { feed?: ArrayBuffer };
+        if (!feed) return said;
+        const bytes = new Uint8Array(feed);
+        return bytes[0] === 123
+          ? { ...said, note: JSON.parse(new TextDecoder().decode(bytes)) }
+          : { ...said, bytes: [...bytes] };
+      });
+    };
+    const fault = (message: string, type: string, line: number | null, trace: string) => ({
+      message,
+      type,
+      line,
+      trace,
+    });
+    expect(await told("frame")).toEqual([
+      { film: 8, bytes: [8] },
+      { film: 8, frame: true },
+    ]);
+    expect(await told("frame then fail")).toEqual([
+      { film: 8, bytes: [8] },
+      { film: 8, frame: true },
+      { film: 8, note: { error: fault("bad name", "NameError", 7, "trace of 7") } },
+      { film: 8, error: fault("bad name", "NameError", 7, "trace of 7") },
+    ]);
+    expect(await told("fail without a line")).toEqual([
+      { film: 8, bytes: [8] },
+      { film: 8, note: { error: fault("bad syntax", "SyntaxError", null, "trace") } },
+      { film: 8, error: fault("bad syntax", "SyntaxError", null, "trace") },
+    ]);
   });
 
   test("the embedded worker reports a terminal boot failure and rejects later runs", async () => {
     const state = await page();
     new state.api.ManimgxPlayer().connectedCallback();
-    state.flush();
+    await state.flush();
     const messages: unknown[] = [];
     const global = {
       onmessage: null as ((event: { data: unknown }) => void) | null,
@@ -656,5 +829,158 @@ describe("published browser module", () => {
     });
     await settle();
     expect(messages).toHaveLength(2);
+  });
+
+  test("ships its worker inside, and refers to no file beside it", () => {
+    expect(bundle).not.toContain("director.js");
+    expect(bundle).not.toContain("import.meta");
+  });
+
+  test("tells webpack to leave the engine's import alone, which it would compile to a failure", () => {
+    expect(bundle.match(/\bimport\(\/\* webpackIgnore: true \*\/ [\w$]+\)/g)).toHaveLength(1);
+  });
+});
+
+describe("what the page hears of the scene", () => {
+  const failure: BrowserAPI.SceneError = {
+    message: "name 'radius' is not defined",
+    type: "NameError",
+    line: 7,
+    trace: '  File "scene.py", line 7, in construct\n    Circle(radius)\nNameError: not defined\n',
+  };
+  const engine = { engine: { js: "", wasm: new Uint8Array(), fonts: [] } };
+
+  // An element on its first film, its engine up, and the events it dispatches.
+  async function started() {
+    const state = await page();
+    const player = new state.api.ManimgxPlayer();
+    player.source = "scene";
+    player.connectedCallback();
+    await state.flush();
+    const director = state.workers[0]!;
+    const events: Event[] = [];
+    const heard: [string, BrowserAPI.SceneError | null][] = [];
+    for (const type of ["error", "loadeddata"]) {
+      player.addEventListener(type, (event) => {
+        events.push(event);
+        heard.push([event.type, player.error]); // what the property says as the event fires
+      });
+    }
+    return { state, player, director, events, heard };
+  }
+
+  test("a failed run is an error event, and the error says why", async () => {
+    const { state, player, director, events, heard } = await started();
+    await director.onmessage!({ data: engine });
+    await settle();
+    expect(player.error).toBeNull();
+    await director.onmessage!({ data: { film: 1, error: failure } });
+    expect(player.error).toEqual(failure);
+    expect(heard).toEqual([["error", failure]]);
+    const [event] = events as [ErrorEvent];
+    expect(event).toBeInstanceOf(ErrorEvent);
+    expect(event).toMatchObject({
+      target: player,
+      message: failure.message,
+      lineno: 7,
+      error: failure,
+      bubbles: false,
+      cancelable: false,
+    });
+    // like a media element's, the error cannot be set; and what it holds is as it was said
+    expect(Reflect.set(player, "error", null)).toBe(false);
+    expect(Object.isFrozen(player.error)).toBe(true);
+    // each failed run says so, and a failure without a line (a SyntaxError's has one, a
+    // package that would not install has none) is line 0 to the event
+    const other = { message: "no module", type: "Error", line: null, trace: "no module" };
+    await director.onmessage!({ data: { film: 1, error: other } });
+    expect(player.error).toEqual(other);
+    expect(events).toHaveLength(2);
+    expect(events[1]).toMatchObject({ message: "no module", lineno: 0 });
+    expect(state.natives).toHaveLength(1);
+  });
+
+  test("the first frame of a run is loadeddata, and clears the error", async () => {
+    const { player, director, heard } = await started();
+    await director.onmessage!({ data: engine });
+    await settle();
+    await director.onmessage!({ data: { film: 1, error: failure } });
+    await director.onmessage!({ data: { film: 1, frame: true } });
+    expect(player.error).toBeNull();
+    expect(heard).toEqual([
+      ["error", failure],
+      ["loadeddata", null], // cleared before the event
+    ]);
+    // every run's first frame is one, and a run can fail after it
+    await director.onmessage!({ data: { film: 1, frame: true } });
+    await director.onmessage!({ data: { film: 1, error: failure } });
+    expect(player.error).toEqual(failure);
+    expect(heard.map(([type]) => type)).toEqual(["error", "loadeddata", "loadeddata", "error"]);
+  });
+
+  test("what the director said before the engine was up is heard after the bytes before it", async () => {
+    const { state, player, director, heard } = await started();
+    const says = (data: unknown) => director.onmessage!({ data });
+    const feeds = () => state.natives[0]?.feeds.length;
+    const where: [string, number | undefined][] = [];
+    player.addEventListener("loadeddata", () => where.push(["loadeddata", feeds()]));
+    player.addEventListener("error", () => where.push(["error", feeds()]));
+    await says({ film: 1, feed: new Uint8Array([1]).buffer });
+    await says({ film: 1, frame: true });
+    await says({ film: 1, feed: new Uint8Array([2]).buffer });
+    await says({ film: 1, error: failure });
+    expect(heard).toEqual([]);
+    expect(player.error).toBeNull();
+    await says(engine);
+    await settle();
+    expect(state.natives[0]!.feeds).toEqual([[1], [2]]);
+    expect(where).toEqual([
+      ["loadeddata", 1],
+      ["error", 2],
+    ]);
+    expect(player.error).toEqual(failure);
+  });
+
+  test("hears nothing once it is detached, or when it has failed", async () => {
+    const detached = await started();
+    await detached.director.onmessage!({ data: engine });
+    await settle();
+    detached.player.disconnectedCallback();
+    await detached.director.onmessage!({ data: { film: 1, error: failure } });
+    await detached.director.onmessage!({ data: { film: 1, frame: true } });
+    expect(detached.heard).toEqual([]);
+    expect(detached.player.error).toBeNull();
+
+    const broken = await started();
+    await broken.director.onmessage!({ data: engine });
+    await settle();
+    await broken.director.onmessage!({ data: { film: 1, feed: new Uint8Array([255]).buffer } });
+    expect(broken.state.waiting.textContent).toBe("ManimGX stopped: decode failed");
+    expect(broken.player.failure).toEqual({
+      reason: "engine",
+      message: "ManimGX stopped: decode failed",
+    });
+    await broken.director.onmessage!({ data: { film: 1, error: failure } });
+    expect(broken.heard).toEqual([]);
+  });
+
+  test("a listener that takes the element away stops what it was hearing", async () => {
+    const { state, player, director, heard } = await started();
+    player.addEventListener("loadeddata", () => player.disconnectedCallback());
+    const says = (data: unknown) => director.onmessage!({ data });
+    await says({ film: 1, feed: new Uint8Array([1]).buffer });
+    await says({ film: 1, frame: true });
+    await says({ film: 1, feed: new Uint8Array([2]).buffer });
+    await says({ film: 1, error: failure });
+    await says(engine);
+    await settle();
+    expect(state.natives[0]!.feeds).toEqual([[1]]);
+    expect(heard.map(([type]) => type)).toEqual(["loadeddata"]);
+    // what it left unheard does not reach the next connection's decoder
+    player.connectedCallback();
+    await state.flush();
+    await settle();
+    expect(state.natives[1]!.feeds).toEqual([]);
+    expect(player.error).toBeNull();
   });
 });

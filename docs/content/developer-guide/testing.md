@@ -14,7 +14,10 @@ The browser package's tests live beside it, in
 [`browser/tests/`](https://github.com/academa-labs/manimgx/tree/main/browser/tests).
 Run them with `just test-typescript`: it builds the package, tests the compiled player and
 embedded worker with browser and Pyodide doubles, and type-checks a consumer of the generated
-public declarations. These tests need Bun; they do not need a GPU or download Pyodide.
+public declarations. These tests need Bun; they do not need a GPU or download Pyodide. The
+Python the worker runs is a string in
+[`browser/src/director.ts`](https://github.com/academa-labs/manimgx/blob/main/browser/src/director.ts),
+which `tests/test_browser.py` runs with the real interpreter and real scenes.
 
 ## [pytest](https://docs.pytest.org): the test runner
 

@@ -452,6 +452,10 @@ and the director's worker (`src/director.ts`). `just build-npm` compiles the wor
 embedding it in one browser module (`dist/manimgx.js`), and TypeScript 7 generates the public
 declarations from the implementation. The package installs ManimGX's wheel for the browser
 from PyPI, at its own version, in Pyodide, and plays with the player that wheel's engine carries.
+Beside the take, the director tells the element when a run has made its first frame and why a
+run failed, and the element dispatches them as `loadeddata` and `error`, as a media element does.
+Before it makes the director, the element checks the browser's GPU for what the engine needs,
+and an element that cannot play dispatches `failure`.
 
 The development tools are pinned in `bun.lock`. `just check` checks the TypeScript and its
 formatting; `just test-typescript` runs the package's tests, in `browser/tests/`.

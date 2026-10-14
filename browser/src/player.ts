@@ -10,10 +10,15 @@
 
 import type { Engine, Player } from "./engine.js";
 import { message } from "./protocol.js";
-import type { FromDirector, ToDirector } from "./protocol.js";
+import type { Failure, FromDirector, SceneError, ToDirector, Unsupported } from "./protocol.js";
 
 const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/";
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+
+/** What the engine needs of a GPU beyond WebGPU itself, in WebGPU's names: float32 targets it
+ *  blends (a view adds its coverage in one), and float32 depth with stencil (its reversed-Z
+ *  depth). The engine asks its adapter for the same (rust/engine/src/render.rs, `adapter`). */
+const FEATURES = ["float32-blendable", "depth32float-stencil8"];
 
 /** Where Pyodide and ManimGX come from (set before the first film starts). */
 export const settings = {
@@ -23,87 +28,144 @@ export const settings = {
   manimgx: "manimgx",
 };
 
-/** The entry point supplies the bundled director's script. */
-export const runtime = {
-  worker: (): string | URL => new URL("./director.js", import.meta.url),
-};
+let script: () => string | URL; // the director's script, as `define` was given it
 
+/** The part of WebGPU looked at before anything downloads. */
+interface Gpu {
+  requestAdapter(options: {
+    powerPreference: "high-performance";
+  }): Promise<{ readonly features: ReadonlySet<string> } | null>;
+}
+
+let checked: Promise<Unsupported | null> | undefined;
+
+/** What this browser lacks to play films, or null if it lacks nothing: WebGPU, a GPU it can draw
+ *  with (the one the engine asks for), and what the engine needs of that GPU. Nothing downloads
+ *  to find out, and it is found out once for the page. A player finds it out too, before it
+ *  downloads Python: a page asks only to know before it makes one. */
+export function unsupported(): Promise<Unsupported | null> {
+  checked ??= lacking();
+  return checked;
+}
+
+async function lacking(): Promise<Unsupported | null> {
+  const gpu = (navigator as { gpu?: Gpu }).gpu;
+  if (!gpu) {
+    return { reason: "webgpu", message: "This browser has no WebGPU, which ManimGX draws with." };
+  }
+  const adapter = await gpu
+    .requestAdapter({ powerPreference: "high-performance" })
+    .catch(() => null);
+  if (!adapter) {
+    return { reason: "adapter", message: "WebGPU found no GPU here for ManimGX to draw with." };
+  }
+  const missing = FEATURES.filter((feature) => !adapter.features.has(feature));
+  if (missing.length === 0) return null;
+  return {
+    reason: "features",
+    missing,
+    message: `This GPU lacks what ManimGX draws with: WebGPU's ${missing.join(" and ")}.`,
+  };
+}
+
+/** What the director says to a film's element. */
 interface PagePlayer {
   wait(): void;
   feed(bytes: ArrayBuffer): void;
-  fail(error: string): void;
+  frame(): void;
+  error(error: SceneError): void;
+  fail(failure: Failure): void;
 }
 
 interface Page {
-  director: Worker;
   players: Map<number, PagePlayer>;
   engine: Promise<Engine | null>;
   status: string;
-  failure: string | null;
+  failure: Failure | null;
+  /** Say it to the director, which exists once the browser is known to play films. */
+  send(data: ToDirector): void;
 }
 
-let page: Page | undefined; // the page's director, its engine (once it is up), and its players
+// The page's director, its engine (once it is up), and its players. A page that failed is
+// forgotten, so a player made later begins again: the download may work now.
+let page: Page | undefined;
 
-function send(director: Worker, data: ToDirector): void {
-  director.postMessage(data);
-}
-
-/** The page's director (Pyodide, in a worker) and engine, begun once. */
+/** The page's director (Pyodide, in a worker) and engine, begun once: its worker made, and Python
+ *  downloaded, only if this browser can play what they make. */
 function begin(): Page {
   if (page) return page;
-  const director = new Worker(runtime.worker(), { type: "module" });
+  let director: Worker | undefined;
+  const early: ToDirector[] = []; // what the page said before its director was made
   const players = new Map<number, PagePlayer>();
   let up: (engine: Engine | null) => void = () => {};
   const current: Page = {
-    director,
     players,
     engine: new Promise((resolve) => (up = resolve)),
-    status: "Loading Python…",
+    status: "", // nothing to say while the browser is checked
     failure: null,
+    send: (data) => (director ? director.postMessage(data) : early.push(data)),
   };
   page = current;
-  const fail = (error: string): void => {
+  const fail = (failure: Failure): void => {
     if (current.failure !== null) return;
-    current.failure = current.status = error;
+    current.failure = failure;
+    current.status = failure.message;
     up(null);
-    director.terminate();
-    for (const player of players.values()) player.fail(error);
+    director?.terminate();
+    if (page === current) page = undefined;
+    for (const player of [...players.values()]) player.fail(failure);
   };
-  director.onerror = (event) => fail(`ManimGX could not start: ${event.message}`);
-  director.onmessageerror = () => fail("ManimGX could not read its worker's reply");
-  director.onmessage = async ({ data }: MessageEvent<FromDirector>) => {
-    if (current.failure !== null) return;
-    if ("failure" in data) return fail(data.failure);
-    if ("status" in data) {
-      current.status = data.status;
-      for (const player of players.values()) player.wait();
-    }
-    if ("engine" in data) {
-      // the player, from the ManimGX the director installed: its JS, its WebAssembly, the fonts
-      // its face is set in
-      const { js, wasm, fonts } = data.engine;
-      const url = URL.createObjectURL(new Blob([js], { type: "text/javascript" }));
-      try {
-        const engine = (await import(url)) as Engine;
-        await engine.default({ module_or_path: wasm });
-        await engine.init(fonts);
-        up(engine);
-      } catch (error) {
-        fail(`ManimGX can't draw here: ${message(error)}`);
-      } finally {
-        URL.revokeObjectURL(url);
+  const python = (said: string): void => fail({ reason: "python", message: said });
+  void unsupported().then((lacks) => {
+    if (lacks) return fail(lacks);
+    director = new Worker(script(), { type: "module" });
+    director.onerror = (event) => python(`ManimGX could not start: ${event.message}`);
+    director.onmessageerror = () => python("ManimGX could not read its worker's reply");
+    director.onmessage = async ({ data }: MessageEvent<FromDirector>) => {
+      if (current.failure !== null) return;
+      if ("failure" in data) return python(data.failure);
+      if ("status" in data) {
+        current.status = data.status;
+        for (const player of players.values()) player.wait();
       }
-    }
-    if ("film" in data) players.get(data.film)?.feed(data.feed);
-  };
-  send(director, { boot: { pyodide: settings.pyodide, manimgx: settings.manimgx } });
-  return page;
+      if ("engine" in data) {
+        // the player, from the ManimGX the director installed: its JS, its WebAssembly, the
+        // fonts its face is set in
+        const { js, wasm, fonts } = data.engine;
+        const url = URL.createObjectURL(new Blob([js], { type: "text/javascript" }));
+        try {
+          const engine = (await import(url)) as Engine;
+          await engine.default({ module_or_path: wasm });
+          await engine.init(fonts);
+          up(engine);
+        } catch (error) {
+          fail({ reason: "engine", message: `ManimGX can't draw here: ${message(error)}` });
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      }
+      if ("film" in data) {
+        const player = players.get(data.film);
+        if ("feed" in data) player?.feed(data.feed);
+        else if ("frame" in data) player?.frame();
+        else player?.error(data.error);
+      }
+    };
+    director.postMessage({ boot: { pyodide: settings.pyodide, manimgx: settings.manimgx } });
+    for (const data of early.splice(0)) director.postMessage(data);
+  });
+  return current;
 }
 
 let films = 0;
 
 /** A scene written in Python, made in the page and played on a canvas by ManimGX's engine,
- *  with the engine's own controls. */
+ *  with the engine's own controls.
+ *
+ *  As a media element does, it tells the page how the scene fares: a `loadeddata` event when a
+ *  run of the scene has made its first frame, and an `error` event (an `ErrorEvent`) when a run
+ *  fails, whose `error` property says why. If it cannot play at all, a `failure` event, whose
+ *  `failure` property says why. */
 export class ManimgxPlayer extends HTMLElement {
   static observedAttributes = ["scene"];
 
@@ -111,10 +173,11 @@ export class ManimgxPlayer extends HTMLElement {
   #canvas: HTMLCanvasElement;
   #said: HTMLParagraphElement;
   #source: string | null = null;
-  #backlog: ArrayBuffer[] = []; // the director's bytes that came before the player
+  #error: SceneError | null = null;
+  #failure: Failure | null = null;
+  #backlog: (() => void)[] = []; // what the director said before the player was up, in order
   #wants: { time: number; playing: boolean | null } = { time: 0, playing: null };
   #begun = false;
-  #failed = false;
   #player: Player | null = null; // native GPU resources belong to one connected lifetime
   #connection: AbortController | undefined;
   #timer: number | undefined;
@@ -138,7 +201,7 @@ export class ManimgxPlayer extends HTMLElement {
 
   connectedCallback(): void {
     if (!this.hasAttribute("tabindex")) this.tabIndex = 0; // it takes keys
-    if (this.#connection || this.#failed) return;
+    if (this.#connection || this.#failure !== null) return;
     this.#film = ++films; // late bytes from an earlier connection belong to its old decoder
     const connection = (this.#connection = new AbortController());
     // Begun a task later: a page can still set `settings` after importing this.
@@ -161,7 +224,7 @@ export class ManimgxPlayer extends HTMLElement {
     this.#connection?.abort();
     this.#connection = undefined;
     if (page?.players.delete(this.#film) && page.failure === null) {
-      send(page.director, { film: this.#film, drop: true });
+      page.send({ film: this.#film, drop: true });
     }
     this.#backlog = [];
     const player = this.#player;
@@ -184,6 +247,19 @@ export class ManimgxPlayer extends HTMLElement {
   set source(code: string | null) {
     this.#source = code == null ? null : String(code);
     if (this.#begun && this.#source !== null) this.#run();
+  }
+
+  /** Why the scene's latest run failed, until a later run makes its first frame; null if it has
+   *  not failed. Set before the `error` event, and cleared before `loadeddata`. */
+  get error(): SceneError | null {
+    return this.#error;
+  }
+
+  /** Why it cannot play at all, once it cannot: what the browser lacks, or what failed later.
+   *  Null until then; set before the `failure` event. It stays failed: another element tries
+   *  again. */
+  get failure(): Failure | null {
+    return this.#failure;
   }
 
   /** The scene shown (a file may define several; N and P go through them). Another scene starts
@@ -230,18 +306,19 @@ export class ManimgxPlayer extends HTMLElement {
   // ── the player ─────────────────────────────────────────────────────────────────────────
 
   async #begin(signal: AbortSignal): Promise<void> {
-    if (this.#failed) return;
+    if (this.#failure !== null) return;
     if (!this.#begun) {
       this.#begun = true;
       const script = this.querySelector('script[type="text/python"]');
       if (script && this.#source === null) this.#source = dedent(script.textContent);
     }
-    const { players, engine, failure } = begin();
-    if (failure !== null) return this.#fail(failure);
+    const { players, engine } = begin();
     players.set(this.#film, {
       wait: () => this.#wait(),
       feed: (bytes) => this.#feed(bytes),
-      fail: (error) => this.#fail(error),
+      frame: () => this.#loaded(),
+      error: (error) => this.#broke(error),
+      fail: (failure) => this.#fail(failure),
     });
     this.#wait();
     if (this.#source !== null) this.#run();
@@ -258,54 +335,86 @@ export class ManimgxPlayer extends HTMLElement {
         signal.addEventListener("abort", () => resolve(undefined), { once: true }),
       ),
     ]);
-    if (!made || signal.aborted || this.#failed) return;
+    if (!made || signal.aborted || this.#failure !== null) return;
     try {
       const { time, playing } = this.#wants;
       this.#player = new made.Player(canvas, time, playing ?? this.hasAttribute("autoplay"), MAC);
       this.#player.resize(canvas.width, canvas.height, devicePixelRatio);
     } catch (error) {
-      return this.#fail(error);
+      return this.#stop(error);
     }
     this.#said.remove();
     this.#wire(signal);
-    for (const bytes of this.#backlog.splice(0)) this.#feed(bytes);
+    for (const step of this.#backlog.splice(0)) {
+      if (signal.aborted) break; // a listener took the element away
+      step();
+    }
     this.#after();
   }
 
   #wait(): void {
-    if (!this.#player && !this.#failed) this.#said.textContent = begin().status;
+    if (!this.#player && this.#failure === null && page) this.#said.textContent = page.status;
   }
 
-  #fail(error: unknown): void {
-    this.#failed = true;
+  /** It cannot play: it says why, and tells the page. */
+  #fail(failure: Failure): void {
+    this.#failure = Object.freeze(failure);
     this.disconnectedCallback();
-    this.#said.textContent = message(error);
+    this.#said.textContent = failure.message;
     this.#root.append(this.#said);
+    this.dispatchEvent(new Event("failure"));
+  }
+
+  /** Its engine failed while it played. */
+  #stop(error: unknown): void {
+    this.#fail({ reason: "engine", message: `ManimGX stopped: ${message(error)}` });
   }
 
   #run(): void {
     if (this.#source === null || !page?.players.has(this.#film)) return;
-    send(begin().director, {
+    page.send({
       film: this.#film,
       run: { source: this.#source, scene: this.getAttribute("scene") },
     });
   }
 
+  /** The player, if what the director said (`later`) can be acted on now. Before the player is
+   *  up it is kept, to be acted on then in the order it was said: the bytes first, and what the
+   *  page hears of them after. */
+  #up(later: () => void): Player | null {
+    if (this.#failure !== null) return null;
+    if (!this.#player) this.#backlog.push(later);
+    return this.#player;
+  }
+
   #feed(bytes: ArrayBuffer): void {
-    if (this.#failed) return;
-    if (!this.#player) {
-      this.#backlog.push(bytes);
-      return;
-    }
+    const player = this.#up(() => this.#feed(bytes));
+    if (!player) return;
     try {
-      this.#player.feed(new Uint8Array(bytes));
+      player.feed(new Uint8Array(bytes));
     } catch (error) {
-      return this.#fail(error);
+      return this.#stop(error);
     }
     // the film's own proportions (unless the page sizes the player itself)
-    const film = this.#player.film;
+    const film = player.film;
     if (film) this.style.setProperty("--film", `${film[0]} / ${film[1]}`);
     this.#after();
+  }
+
+  /** A run has made its first frame: the film is there, and it has not failed (yet). */
+  #loaded(): void {
+    if (!this.#up(() => this.#loaded())) return;
+    this.#error = null;
+    this.dispatchEvent(new Event("loadeddata"));
+  }
+
+  /** A run failed. The player shows the error over the last picture it has. */
+  #broke(error: SceneError): void {
+    if (!this.#up(() => this.#broke(error))) return;
+    this.#error = Object.freeze(error);
+    this.dispatchEvent(
+      new ErrorEvent("error", { message: error.message, lineno: error.line ?? 0, error }),
+    );
   }
 
   /** What the viewer does, handed on as the web has it; what the player takes, the page doesn't. */
@@ -416,7 +525,7 @@ export class ManimgxPlayer extends HTMLElement {
     try {
       wake = p.wake();
     } catch (error) {
-      return this.#fail(error);
+      return this.#stop(error);
     }
     if (wake === 0) this.#frame ||= requestAnimationFrame(() => this.#draw());
     else if (wake > 0) this.#timer = setTimeout(() => this.#after(), wake);
@@ -427,7 +536,7 @@ export class ManimgxPlayer extends HTMLElement {
     try {
       this.#player?.draw();
     } catch (error) {
-      return this.#fail(error);
+      return this.#stop(error);
     }
     this.#after();
   }
@@ -440,8 +549,10 @@ function dedent(text: string): string {
   return lines.map((l) => l.slice(indent)).join("\n") + "\n";
 }
 
-/** Define <manimgx-player> (once `settings` are as they should be). */
-export function define(): void {
+/** Define <manimgx-player> (once `settings` are as they should be). Its Python runs in the
+ *  worker whose script `worker` gives: the entry point supplies the director it carries. */
+export function define(worker: () => string | URL): void {
+  script = worker;
   customElements.get("manimgx-player") ?? customElements.define("manimgx-player", ManimgxPlayer);
 }
 
