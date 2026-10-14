@@ -6,7 +6,7 @@ Some tasks must run the same way every time:
 
 - **For every change**, pushed to `main` or proposed in a pull request: run the checks,
   and the tests on every system and Python ManimGX supports; time it against the code
-  before it; build the docs; publish the tests' coverage and a preview of the docs.
+  before it; build the docs; and, from `main`, publish them and the tests' coverage.
 - **For every release:** test; build the wheels, the source distribution, the font
   packages and the executables; publish them to GitHub and PyPI, the package for the
   browser to npm, and the Docker image to ghcr.io.
@@ -63,12 +63,10 @@ The seven regular build, release and collaboration workflows are in
 5. **Combine the coverage**, even when a test job failed: `just combine-coverage` makes one
    report of the jobs' data, and its table goes in the run's summary. The report is kept,
    with the data of a coverage badge (`badge.json`).
-6. **Publish the coverage**, for `main`'s pushes and for pull requests from a branch of the
-   repository: to the Worker `manimgx-coverage`
-   ([`.github/deploy/coverage.jsonc`](https://github.com/academa-labs/manimgx/blob/main/.github/deploy/coverage.jsonc)).
-   `main`'s report is served at <https://coverage.manimgx.academa.ai>. Each commit's report
-   is also a preview deployment of its own (in the preview `main`, or `pr-<number>`), which
-   the commit's "coverage" status links to.
+6. **Publish the coverage**, for `main`'s pushes: to the Worker `manimgx-coverage`
+   ([`.github/deploy/coverage.jsonc`](https://github.com/academa-labs/manimgx/blob/main/.github/deploy/coverage.jsonc)),
+   which serves `main`'s report at <https://coverage.manimgx.academa.ai>. A pull request's
+   coverage is the table in its run's summary.
 
 ### 2. [`benchmark.yaml`](https://github.com/academa-labs/manimgx/blob/main/.github/workflows/benchmark.yaml): the timed benchmarks
 
@@ -94,28 +92,21 @@ on a quiet machine. Linux and Windows keep their functional rendering tests.
 **When it runs:**
 
 - Every push to `main`.
-- Every pull request, as it is opened, updated, reopened and closed.
+- Every pull request.
 - By hand, from GitHub's interface.
 
-**What it does**, in four jobs:
+**What it does**, in two jobs:
 
-1. **Build**, on macOS for every run except a pull request's closing: checks the docs'
-   JavaScript interactions and reference declarations, restores verified film-cache entries,
-   runs `just render-docs`, saves completed films, then runs `just build-docs-pages`.
-   Metal draws the examples; narrated examples speak from `docs/voice/`, so no voice key is
-   needed. The built `docs/site/` is kept for seven days. Deployment configuration is checked
-   out separately from the trusted base commit, so the build cannot supply commands for a job
-   with credentials to execute.
+1. **Build**, on macOS: checks the docs' JavaScript interactions and reference declarations,
+   restores verified film-cache entries, runs `just render-docs`, saves completed films, then
+   runs `just build-docs-pages`. Metal draws the examples; narrated examples speak from
+   `docs/voice/`, so no voice key is needed. The built `docs/site/` is kept for seven days.
+   The deploy checks out its configuration from `main`, separately from the artifact, so the
+   build cannot supply commands for a job with credentials to execute.
 2. **Deploy**, from `main` (a push, or a run by hand): deploys what the build made to
    Cloudflare Workers with `wrangler deploy --config .github/deploy/docs.jsonc`, the
    commit's hash as its message. The `docs` environment shows the site's address,
    <https://manimgx.academa.ai>.
-3. **Preview**, for a pull request from a branch of the repository: uploads the build as a
-   preview named `pr-<number>`, at its own address, shown on the `docs-preview`
-   environment.
-4. **Delete the previews**, when a pull request closes, for both docs and coverage. An
-   absent preview is already clean; authentication failures and other API errors fail
-   the job.
 
 See [Documentation](documentation.md#deployment) for how the site is served.
 
@@ -279,21 +270,20 @@ pull request is opened or marked ready for review.
 
 ## Deployment credentials
 
-Builds and tests receive no deployment credentials. Publishing jobs use only the trusted
-base commit's deployment files and the static artifacts:
+Builds and tests receive no deployment credentials. The deploying jobs run only for `main`,
+and use only its deployment files and the static artifacts:
 
 - The checks, the tests and the docs' build run the repository's code (they build the
   engine and render scenes), with a token that can only read the repository. The jobs that
-  get Cloudflare's API token run a pinned Wrangler on the built files (and `gh`, to set
-  the coverage status). Cleanup uses the trusted base commit's `cleanup.py`. Neither
+  get Cloudflare's API token run a pinned Wrangler on the built files. Neither
   deployment configuration nor executable code is taken from a build artifact.
 - Academa's `internal/manimgx-hosting` Terraform unit owns the Worker identities,
   custom domains, GitHub environments and credentials. Each site's
   `CLOUDFLARE_API_TOKEN` can edit only that Worker; the account ID is the repository
-  variable `CLOUDFLARE_ACCOUNT_ID`. Production environments allow `main`; preview
-  environments also allow pull request merge refs.
-- Pull requests from forks and from Dependabot get no secrets: they are built and tested,
-  not previewed, and their coverage is not published.
+  variable `CLOUDFLARE_ACCOUNT_ID`. The sites' environments, `docs` and `coverage`, allow
+  only `main`.
+- Pull requests, from a branch of the repository, a fork or Dependabot alike, are built and
+  tested; nothing of theirs is published.
 - The first reply's model can only read, and the job that posts its reply runs no model.
 - The @claude assistant is the exception: it runs the repository's code (`just sync`, the
   checks, the tests) with the AWS session at hand, and its sandbox hides the session from

@@ -87,7 +87,6 @@ jobs:
     uses: $/.github/workflows/test.yaml
     permissions:
       contents: read
-      statuses: write
 
   wheels:
     name: Wheels

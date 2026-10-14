@@ -1,7 +1,7 @@
 # The checks every change must pass: the pre-commit checks, and the tests on each OS and Python
-# ManimGX supports. Their coverage is combined into one report on Cloudflare: main's at
-# https://coverage.manimgx.academa.ai, a pull request's on its preview URL, and each commit's
-# linked from its "coverage" status. A tagged release requires these checks before publication.
+# ManimGX supports. Their coverage is combined into one report, whose table is in the run's
+# summary; main's report is published on Cloudflare, at https://coverage.manimgx.academa.ai.
+# A tagged release requires these checks before publication.
 
 name: Test
 
@@ -293,26 +293,20 @@ jobs:
   publish-coverage:
     name: Publish the coverage
     needs: coverage
-    # main's pushes, and pull requests from this repository: pull requests from forks and from
-    # Dependabot get no secrets
+    # main's complete report; every run's summary has its own table
     if: >-
-      needs.coverage.outputs.total != '' && needs.coverage.outputs.total != 'partial' && (
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
-      || (github.event_name == 'pull_request'
-          && github.event.pull_request.head.repo.full_name == github.repository
-          && github.actor != 'dependabot[bot]'))
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.coverage.outputs.total != '' && needs.coverage.outputs.total != 'partial'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
-      statuses: write
     environment:
-      name: ${{ github.event_name == 'push' && 'coverage' || 'coverage-preview' }}
-      url: ${{ steps.publish.outputs.url }}
+      name: coverage
+      url: https://coverage.manimgx.academa.ai
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
           sparse-checkout: .github/deploy
           sparse-checkout-cone-mode: false
@@ -324,32 +318,10 @@ jobs:
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
-      # main's report goes to its domain; every commit's report is also a deployment of its own
-      # (in the Worker's preview "main", or "pr-<number>"), which its status links to
       - name: Publish the report
-        id: publish
-        run: |
-          if [[ "${GITHUB_EVENT_NAME}" == push ]]; then
-            bunx "wrangler@${WRANGLER_VERSION}" deploy --config .github/deploy/coverage.jsonc \
-              --message "${SHA}"
-            url="https://coverage.manimgx.academa.ai"
-            preview="main"
-          else
-            preview="pr-${PR_NUMBER}"
-          fi
-          bunx "wrangler@${WRANGLER_VERSION}" preview --config .github/deploy/coverage.jsonc \
-            --name "${preview}" --message "${SHA}"
-          deployment="$(jq -er 'select(.type == "preview") | .deployment_urls[0]' "${WRANGLER_OUTPUT_FILE_PATH}")"
-          url="${url:-$(jq -er 'select(.type == "preview") | .preview_urls[0]' "${WRANGLER_OUTPUT_FILE_PATH}")}"
-          echo "url=${url}" >> "${GITHUB_OUTPUT}"
-          gh api "repos/${GITHUB_REPOSITORY}/statuses/${SHA}" --field state=success \
-            --field context=coverage --field description="${TOTAL}% of lines run" \
-            --field target_url="${deployment}"
+        run: >-
+          bunx "wrangler@${WRANGLER_VERSION}" deploy --config .github/deploy/coverage.jsonc
+          --message "${GITHUB_SHA}"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler.ndjson
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          TOTAL: ${{ needs.coverage.outputs.total }}

@@ -490,24 +490,23 @@ assets: no Worker script runs, and every request is answered from the files in `
 configures it:
 
 - The Worker, `manimgx-docs`, serves the site at its domain,
-  [manimgx.academa.ai](https://manimgx.academa.ai).
+  [manimgx.academa.ai](https://manimgx.academa.ai), and only there: neither the Worker nor a
+  version of it has a `workers.dev` address.
 - A page is a folder (`changelog/index.html`): a request for `/changelog` is redirected to
   `/changelog/`.
 - A path that matches nothing gets the nearest `404.html`, with status 404.
 - `docs/content/_headers` is copied to the site's root, where Cloudflare reads it (it is
-  never served): security headers for every page, long caching for the theme's bundles
-  (their names change with their content), and `noindex` on `workers.dev` hosts.
+  never served): security headers for every page, and long caching for the theme's bundles
+  (their names change with their content).
 
 Academa's `internal/manimgx-hosting` Terraform unit provisions the Worker identity,
 custom domain and deployment credential. It also provisions the coverage report's
-Worker and domain. Wrangler publishes assets and previews; it leaves domain ownership
+Worker and domain. Wrangler publishes the assets; it leaves domain ownership
 to Terraform. The account ID is a GitHub repository variable, and each site's deployment
-token is installed in its production and preview environments by Terraform.
+token is installed in its environment by Terraform.
 
 The workflow [`deploy-docs.yaml`](https://github.com/academa-labs/manimgx/blob/main/.github/workflows/deploy-docs.yaml)
-builds the site on every push and pull request, deploys it from `main`, and previews each
-pull request from a branch of the repository at its own address,
-`pr-<number>-manimgx-docs.<account subdomain>.workers.dev`. See
+builds the site on every push and pull request, and deploys it from `main`. See
 [GitHub workflows](github-workflows.md#3-deploy-docsyaml-the-docs-site).
 
 ## Learn more
@@ -519,4 +518,4 @@ pull request from a branch of the repository at its own address,
 - [mkdocstrings' Python handler](https://mkdocstrings.github.io/python/): the options in
   `zensical.toml`.
 - [Cloudflare's static assets](https://developers.cloudflare.com/workers/static-assets/):
-  routing, headers, previews.
+  routing, headers.

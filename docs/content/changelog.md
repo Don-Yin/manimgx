@@ -37,6 +37,10 @@ The notable changes to ManimGX, release by release. The format follows
 - Preserve the benchmark comparison images' aspect ratios when PyPI narrows the README table.
 - Credit Filament, whose code the 3D lighting is adapted from, in the README and the wheels' third-party notices.
 
+### Removed
+
+- Remove the pull request previews of the documentation and the coverage report, and the "coverage" commit status; `main` still publishes both sites.
+
 ## 0.1.1
 
 ### Changed
