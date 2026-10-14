@@ -5,7 +5,9 @@
   from 0 to 255 otherwise); anything else is an error, a malformed hex string too.
 - Written as hex and read back, a color is itself, to the 8 bits a digit pair holds.
 - Colors mix in OKLab, weighted by opacity: exactly the ends at 0 and 1, symmetric, in the
-  gamut, and a transparent end does not tint the mix. A gradient runs from its first color to
+  gamut, and a transparent end does not tint the mix. One color mixes to the bit as rows of
+  them do, and a color mixed with another holds their mix; a color's array changed in place
+  mixes as its new value. A gradient runs from its first color to
   its last, a colorscale holds its ends and hits its stops.
 - The conversions are inverse: OKLab, HSV, HSL, and inverting a color.
 
@@ -160,6 +162,38 @@ class TestMix:
         together = color.mix_rgba(a, np.tile(b, (len(a), 1)), t)
         for row, mixed in zip(a, together, strict=True):
             np.testing.assert_allclose(mixed, color.mix_rgba(row, b, t), atol=1e-12)
+
+    @given(a=rgba_values, b=rgba_values, t=st.floats(0, 1))
+    @example(a=np.array([0.2, 0.4, 0.6, 1.0]), b=np.array([0.2, 0.4, 0.6, 0.5]), t=0.5)
+    @example(a=np.array([1.0, 0.0, 0.0, 0.0]), b=np.array([0.0, 0.0, 1.0, 0.0]), t=0.5)
+    def test_one_color_mixes_to_the_bit_as_rows_do(
+        self, a: np.ndarray, b: np.ndarray, t: float
+    ) -> None:
+        np.testing.assert_array_equal(
+            color._mix_color(a, b, t), color._mix_rows(a, b, t)
+        )
+
+    @given(a=rgba_values, b=rgba_values, t=st.floats(0, 1))
+    def test_a_color_mixed_with_another_holds_their_mix(
+        self, a: np.ndarray, b: np.ndarray, t: float
+    ) -> None:
+        x = m.ManimColor(tuple(float(v) for v in a))
+        y = m.ManimColor(tuple(float(v) for v in b))
+        mixed = color.mix_rgba(x.to_rgba(), y.to_rgba(), t)
+        made = m.interpolate_color(x, y, t)
+        np.testing.assert_array_equal(made.to_rgba(), mixed)
+        assert made == m.ManimColor(tuple(mixed.tolist()))
+
+    @given(a=rgba_values, b=rgba_values, c=rgba_values, t=st.floats(0, 1))
+    def test_a_color_changed_in_place_mixes_as_its_new_value(
+        self, a: np.ndarray, b: np.ndarray, c: np.ndarray, t: float
+    ) -> None:
+        held = a.copy()
+        color.mix_rgba(held, b, t)
+        held[:] = c
+        np.testing.assert_array_equal(
+            color.mix_rgba(held, b, t), color.mix_rgba(c.copy(), b, t)
+        )
 
     @given(x=rgbs)
     def test_oklab_is_inverse(self, x: np.ndarray) -> None:

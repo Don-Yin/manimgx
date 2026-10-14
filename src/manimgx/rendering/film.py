@@ -239,7 +239,7 @@ class Film:
         preset: The x264 preset the video is encoded with: faster presets make larger
             files.
         crf: The video's quality, as x264's constant rate factor, from 0 to 51:
-            lower is better, the default value is 18.
+            lower is better, the default value is 19.
     """
 
     def __init__(

@@ -12,9 +12,11 @@ use pyo3::types::PyBytes;
 use crate::render::{COUNT_BYTES, Player, count, with_gpu};
 use crate::{CameraView, take};
 
-// One source for the native binding and every Python export entry point.
-const DEFAULT_ENCODER_PRESET: &str = "medium";
-const DEFAULT_ENCODER_CRF: f32 = 23.0;
+// One source for the native binding and every Python export entry point. `veryfast` at CRF 19
+// looks as `medium` at CRF 23 does (by VMAF), in files about a third larger, in about half
+// x264's time, which a render waits for where the CPU is slow.
+const DEFAULT_ENCODER_PRESET: &str = "veryfast";
+const DEFAULT_ENCODER_CRF: f32 = 19.0;
 
 #[cfg(feature = "typeset")]
 pyo3::create_exception!(_engine, TypstError, pyo3::exceptions::PyException);

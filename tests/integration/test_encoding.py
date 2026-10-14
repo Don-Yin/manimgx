@@ -64,5 +64,5 @@ def test_export_settings_reach_the_encoder(
     else:
         with pytest.raises(Exit):
             take(m.Scene, Format.own(None, None), video=video, **options)
-    assert received == [("slow", 31.0) if override else ("medium", 23.0)]
+    assert received == [("slow", 31.0) if override else ("veryfast", 19.0)]
     assert not video.exists()

@@ -25,6 +25,8 @@ The notable changes to ManimGX, release by release. The format follows
 
 ### Changed
 
+- Render faster: a graph's area reads its points' coordinates all at once, colors mix without numpy's overhead and are converted to OKLab once, and a family is listed in one pass. The frames are the same.
+- Encode videos with x264's `veryfast` preset at CRF 19 by default, rather than `medium` at CRF 23: the same quality by VMAF, in files about a third larger, sooner where the CPU is slow.
 - Show measured render times in a static benchmark chart.
 - Use a Markdown table for the benchmark comparison images.
 - Install ManimGX in the Quickstart with one command, `pip install manimgx`, and run `manimgx` directly throughout the docs.

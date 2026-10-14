@@ -642,6 +642,25 @@ def remove_list_redundancies[T](items: Sequence[T]) -> list[T]:
 
 def _family(roots: Iterable["Mobject"]) -> list["Mobject"]:
     """Preorder from these roots, each member once at its last occurrence."""
+    # Members held once (most families) are the preorder itself, made in one pass; a member
+    # met again sends the work to the walk that keeps last occurrences.
+    roots = list(roots)
+    preorder: list[Mobject] = []
+    met: set[int] = set()
+    pending = roots[::-1]
+    while pending:
+        item = pending.pop()
+        if id(item) in met:
+            return _family_of_repeats(roots)
+        met.add(id(item))
+        preorder.append(item)
+        if item.submobjects:
+            pending.extend(item.submobjects[::-1])
+    return preorder
+
+
+def _family_of_repeats(roots: list["Mobject"]) -> list["Mobject"]:
+    """`_family` of roots whose families share members, or repeat them."""
     # Right-to-left postorder is reversed preorder. Keep its first occurrences,
     # skipping already visited subtrees, then reverse to keep preorder's last ones.
     family: list[Mobject] = []

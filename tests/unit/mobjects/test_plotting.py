@@ -3,15 +3,17 @@
 - A number line's `number_to_point` and `point_to_number` are inverse, on any line: any
   range, length, turn and place, linear or logarithmic; the ends of its range are the ends of
   the line, and equal steps of the range are equal steps along it (of exponents, on a
-  logarithmic line). Ticks and numbers added later follow the line's attributes as they are
-  then, as if it had been made with them.
+  logarithmic line). Points read together read as each does alone: to the bit on a line
+  along a coordinate axis, to rounding on a turned one. Ticks and numbers added later follow
+  the line's attributes as they are then, as if it had been made with them.
 - A graph of a function samples it the same however the function takes its argument: arrays
   at once, one value at a time, or arrays answered wrongly; an error the function raises
   reaches the caller.
 - Axes' `coords_to_point` and `point_to_coords` are inverse, for any ranges and lengths, on
   linear and logarithmic axes alike; `c2p` and `axes @ coords` are the same map; the origin is
   where the axes cross. Their lengths are the lengths they were made with. Riemann rectangles
-  span their sample and their base, on turned axes too. A line graph's vertices are its
+  span their sample and their base, on turned axes too. The area under a graph holds exactly
+  the graph's points whose x is in its range. A line graph's vertices are its
   coordinates' points; an empty one draws nothing; its coordinates come in equal numbers.
 - A plane's lines are its grid: a number plane's at every step from each axis, outward on
   each side, every `faded_line_ratio`-th a background line and the ones between faded (the
@@ -89,6 +91,37 @@ def test_the_ranges_ends_are_the_lines_ends(line: m.NumberLine) -> None:
     np.testing.assert_allclose(start, points[0], atol=1e-9)
     if not line.has_tip():
         np.testing.assert_allclose(end, points[-1], atol=1e-9)
+
+
+@st.composite
+def straight_lines(draw: st.DrawFn) -> m.NumberLine:
+    """A line along the x axis: made, then only moved."""
+    line = m.NumberLine(
+        x_range=draw(_axis_ranges()),
+        length=draw(st.floats(1, 12)),
+        include_tip=draw(st.booleans()),
+    )
+    return line.shift(draw(arrays(3, 5)))
+
+
+@given(line=straight_lines(), offsets=arrays((6, 3), 20))
+def test_a_straight_line_reads_points_together_exactly_as_alone(
+    line: m.NumberLine, offsets: np.ndarray
+) -> None:
+    points = line.get_center() + offsets
+    alone = [line.point_to_number(point) for point in points]
+    np.testing.assert_array_equal(line.point_to_number(points), alone)
+
+
+@given(line=lines(), offsets=arrays((6, 3), 20))
+def test_a_turned_line_reads_points_together_as_alone(
+    line: m.NumberLine, offsets: np.ndarray
+) -> None:
+    points = line.get_center() + offsets
+    alone = [line.point_to_number(point) for point in points]
+    np.testing.assert_allclose(
+        line.point_to_number(points), alone, rtol=1e-12, atol=1e-9
+    )
 
 
 def test_ticks_and_numbers_added_later_follow_the_lines_attributes() -> None:
@@ -170,6 +203,29 @@ def test_a_graph_samples_its_function_however_it_takes_its_argument(
     np.testing.assert_allclose(
         samples, [(x, f(x), 0) for x in xs], rtol=1e-9, atol=1e-12
     )
+
+
+@given(
+    function=st.sampled_from(sorted(FUNCTIONS)),
+    low=st.floats(-3, 0),
+    span=st.floats(0.5, 4),
+    ends=st.tuples(st.floats(0, 1), st.floats(0, 1)),
+    shift=arrays(3, 2),
+)
+def test_an_area_holds_its_graphs_points_within_its_range(
+    function: str,
+    low: float,
+    span: float,
+    ends: tuple[float, float],
+    shift: np.ndarray,
+) -> None:
+    axes = m.Axes(x_range=(-4, 5, 1), y_range=(-5, 5, 1)).scale(0.8).shift(shift)
+    graph = axes.plot(FUNCTIONS[function], x_range=(low, low + span))
+    a, b = sorted(low + end * span for end in ends)
+    within = [p for p in graph.points if a <= axes.p2c(p)[0] <= b]
+    edge = [axes.c2p(a), graph.function(a), *within, graph.function(b), axes.c2p(b)]
+    area = axes.get_area(graph, x_range=(a, b))
+    np.testing.assert_array_equal(area.points, m.Polygon(*edge).points)
 
 
 def test_an_error_the_function_raises_reaches_the_caller() -> None:

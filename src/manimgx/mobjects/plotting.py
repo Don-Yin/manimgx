@@ -109,6 +109,7 @@ if TYPE_CHECKING:
     from manimgx.typing import (
         ManimTextLabel,
         Point3D,
+        Point3D_Array,
         Point3DLike,
         Point3DLike_Array,
         Vector3D,
@@ -737,6 +738,17 @@ class NumberLineOptions(_Tipped, total=False, closed=True):
     without `include_numbers` (default None: the ticks')."""
 
 
+def _along(offsets: np.ndarray, direction: Vector3D) -> np.ndarray:
+    """The projections of an offset, or of an array of them, onto a unit direction. Along a
+    coordinate axis, as a straight number line runs, a projection is that coordinate times
+    ±1: what the dot product gives in any order of summing, so that a point's number is the
+    same alone and among others."""
+    (nonzero,) = np.nonzero(direction)
+    if len(nonzero) == 1:
+        return offsets[..., nonzero[0]] * direction[nonzero[0]]
+    return np.dot(offsets, direction)
+
+
 class NumberLine(Line):
     """A number line: a line with ticks at every step of its range, numbers if asked
     for, and a map between numbers and points; white, with a stroke 2 wide, unless
@@ -1069,7 +1081,7 @@ class NumberLine(Line):
         point = np.asarray(point, dtype=float)
         start, end = self.get_start(), self.get_end()
         unit_vect = normalize(end - start)
-        proportion: float = np.dot(point - start, unit_vect) / np.dot(
+        proportion: float = _along(point - start, unit_vect) / np.dot(
             end - start, unit_vect
         )
         # along the range, then through the scale, as number_to_point goes back
@@ -2496,20 +2508,28 @@ class Axes(VGroup):
             a = max(a, bounded_graph.t_min)
             b = min(b, bounded_graph.t_max)
         if bounded_graph is None:
-            points = (
-                [self.c2p(a), graph.function(a)]
-                + [p for p in graph.points if a <= self.p2c(p)[0] <= b]
-                + [graph.function(b), self.c2p(b)]
-            )
+            points = [
+                self.c2p(a),
+                graph.function(a),
+                *self._points_between(graph, a, b),
+                graph.function(b),
+                self.c2p(b),
+            ]
         else:
             graph_points, bounded_graph_points = (
-                [g.function(a)]
-                + [p for p in g.points if a <= self.p2c(p)[0] <= b]
-                + [g.function(b)]
+                [g.function(a), *self._points_between(g, a, b), g.function(b)]
                 for g in (graph, bounded_graph)
             )
             points = graph_points + bounded_graph_points[::-1]
         return Polygon(*points, **kwargs).set_opacity(opacity).set_color(color)
+
+    def _points_between(
+        self, graph: ParametricFunction, a: float, b: float
+    ) -> Point3D_Array:
+        """The graph's points whose x on the axes is from `a` to `b`, in order: their
+        coordinates read all at once."""
+        x = self.p2c(graph.points)[:, 0]
+        return graph.points[(a <= x) & (x <= b)]
 
     def angle_of_tangent(
         self, x: float, graph: ParametricFunction, dx: float = 1e-08

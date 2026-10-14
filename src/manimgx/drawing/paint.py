@@ -204,12 +204,18 @@ def from_oklab(lab: Floats) -> Floats:
 
 
 _LABS: Memo[int, tuple[Floats, Floats]] = Memo(1 << 12)
+_COLOR_LABS: Memo[bytes, Floats] = Memo(1 << 12)
 
 
 def _lab(rgba: Floats) -> Floats:
     """OKLab of an RGBA array's colors — once per array when the array cannot change (a
-    paint's rows are read-only): a tween mixes the same two paints on every frame."""
+    paint's rows are read-only): a tween mixes the same two paints on every frame; and once
+    per value for one color (a color's own array): an updater mixes the same colors on
+    every frame."""
     if rgba.flags.writeable:
+        if rgba.shape == (4,):
+            rgb = rgba[:3]
+            return _COLOR_LABS.recall(rgb.tobytes(), lambda: frozen(to_oklab(rgb)))
         return to_oklab(rgba[..., :3])
     known = _LABS.recall(id(rgba), lambda: (rgba, to_oklab(rgba[..., :3])))
     if known[0] is not rgba:  # another array, since gone, had its id
@@ -235,6 +241,13 @@ def mix_rgba(a: Floats, b: Floats, t: float | Floats) -> Floats:
     Returns:
         The mixed colors, an array of the same shape; exactly `a` at 0 and `b` at 1.
     """
+    if a.shape == b.shape == (4,) and not isinstance(t, np.ndarray):
+        return _mix_color(a, b, t)
+    return _mix_rows(a, b, t)
+
+
+def _mix_rows(a: Floats, b: Floats, t: float | Floats) -> Floats:
+    """`mix_rgba`, row by row, in numpy: any shape."""
     rows = isinstance(t, np.ndarray) and t.ndim > 0
     if rows:
         t = t.astype(float)[..., None]
@@ -259,6 +272,32 @@ def mix_rgba(a: Floats, b: Floats, t: float | Floats) -> Floats:
     if same.any():
         mixed[..., :3] = np.where(same, a[..., :3], mixed[..., :3])
     return mixed if not rows else np.where(t <= 0.0, a, np.where(t >= 1.0, b, mixed))
+
+
+def _mix_color(a: Floats, b: Floats, t: float) -> Floats:
+    """`mix_rgba` of one color and another: `_mix_rows`'s arithmetic, step by step, on
+    floats (each step rounds as numpy's does), around numpy's OKLab conversion. An updater
+    mixes one color at a time, every frame, where numpy's calls cost more than the
+    arithmetic they do."""
+    if t <= 0.0:
+        return np.array(a, dtype=float)
+    if t >= 1.0:
+        return np.array(b, dtype=float)
+    (ar, ag, ab, aa), (br, bg, bb, ba) = a.tolist(), b.tolist()
+    if (ar, ag, ab) == (br, bg, bb):  # one color: only opacity moves
+        out = np.array(a, dtype=float)
+        out[3] = aa * (1.0 - t) + ba * t
+        return out
+    wa, wb = aa * (1.0 - t), ba * t
+    opacity = wa + wb
+    la, lb = _lab(a).tolist(), _lab(b).tolist()
+    if opacity > 1e-9:
+        lab = [
+            (x * wa + y * wb) / max(opacity, 1e-9) for x, y in zip(la, lb, strict=True)
+        ]
+    else:
+        lab = [x * (1.0 - t) + y * t for x, y in zip(la, lb, strict=True)]
+    return np.array([*from_oklab(np.array(lab)).tolist(), opacity])
 
 
 type ParsableManimColor = ManimColor | str | int | Sequence[float] | np.ndarray
@@ -412,7 +451,7 @@ class ManimColor(str):
         Returns:
             A new color.
         """
-        return ManimColor(tuple(mix_rgba(self._rgba, other._rgba, alpha)))
+        return _made(ManimColor, mix_rgba(self._rgba, other._rgba, alpha))
 
     def opacity(self, opacity: float) -> "ManimColor":
         """This color with another opacity.
@@ -585,7 +624,7 @@ class ManimColor(str):
 
 
 def _bytes(rgba: np.ndarray) -> list[int]:
-    return [round(float(c) * 255) for c in np.clip(rgba, 0.0, 1.0)]
+    return [round(min(max(c, 0.0), 1.0) * 255) for c in rgba.tolist()]
 
 
 def _hex(rgba: np.ndarray) -> str:
@@ -719,7 +758,8 @@ def interpolate_color(a: ManimColor, b: ManimColor, alpha: float) -> ManimColor:
                 self.add(swatches.arrange(buff=0.5))
         ```
     """
-    return ManimColor(a).interpolate(ManimColor(b), alpha)
+    start = a if type(a) is ManimColor else ManimColor(a)
+    return start.interpolate(b if isinstance(b, ManimColor) else ManimColor(b), alpha)
 
 
 def color_gradient(
