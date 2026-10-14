@@ -1719,7 +1719,6 @@ enum Drawing {
     Vector(vector::Plan, Vec<(u32, Vec<Draw>)>),
 }
 
-#[cfg_attr(feature = "python", pyo3::pyclass(module = "manimgx._engine"))]
 pub(crate) struct Player {
     pub(crate) width: u32,
     pub(crate) height: u32,
@@ -1778,7 +1777,28 @@ fn run(pass: &mut wgpu::RenderPass, current: &mut *const wgpu::RenderPipeline, p
 }
 
 impl Player {
-    /// Copy the drawn frame's full-quality RGBA rows, independently of video conversion.
+    /// Draw `frames` and read the last one back into `into`: RGBA8 rows, top to bottom (drawn
+    /// again while its see-through fragments overflow the lists).
+    #[cfg(feature = "python")]
+    pub(crate) fn pixels(&mut self, gpu: &mut Gpu, frames: &[Frame], into: &mut [u8]) -> Result<(), String> {
+        loop {
+            let (mut encoder, _, composited) = self.encode(gpu, frames)?;
+            self.copy_pixels(&mut encoder);
+            let t = self.targets.as_ref().expect("targets");
+            let lists = self.lists.as_ref().filter(|_| composited);
+            if let Some(lists) = lists {
+                encoder.copy_buffer_to_buffer(&lists.appended, 0, &t.readback, t.padded as u64 * self.height as u64, Some(COUNT_BYTES));
+            }
+            let capacity = lists.map(|l| l.capacity);
+            gpu.queue.submit(Some(encoder.finish()));
+            let appended = self.read_pixels(gpu, into)?;
+            if !capacity.is_some_and(|capacity| self.overflowed(gpu, appended, capacity)) {
+                return Ok(());
+            }
+        }
+    }
+
+    /// Copy the frame drawn into the readback buffer: its RGBA rows (padded).
     #[cfg(any(feature = "python", feature = "export"))]
     pub(crate) fn copy_pixels(&self, encoder: &mut wgpu::CommandEncoder) {
         let t = self.targets.as_ref().expect("targets");
@@ -1789,11 +1809,27 @@ impl Player {
         );
     }
 
+    /// The readback buffer, read once the GPU is done: the RGBA8 rows `copy_pixels` copied, top
+    /// to bottom, into `into` (a frame's bytes); the see-through count copied after them (if one
+    /// was).
     #[cfg(any(feature = "python", feature = "export"))]
-    pub(crate) fn map_pixels(&self, gpu: &Gpu) -> Result<(), String> {
-        self.targets.as_ref().expect("targets").readback.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+    pub(crate) fn read_pixels(&self, gpu: &Gpu, into: &mut [u8]) -> Result<u64, String> {
+        let (row, height) = ((self.width * 4) as usize, self.height as usize);
+        if into.len() != row * height {
+            return Err(format!("a frame of {}x{} takes {} bytes, not {}", self.width, self.height, row * height, into.len()));
+        }
+        let t = self.targets.as_ref().expect("targets");
+        t.readback.slice(..).map_async(wgpu::MapMode::Read, |_| {});
         gpu.device.poll(wgpu::PollType::wait_indefinitely()).map_err(|e| e.to_string())?;
-        Ok(())
+        let mapped = t.readback.slice(..).get_mapped_range().map_err(|e| e.to_string())?;
+        let (padded, rows) = (t.padded as usize, t.padded as usize * height);
+        for (to, from) in into.chunks_exact_mut(row).zip(mapped[..rows].chunks_exact(padded)) {
+            to.copy_from_slice(&from[..row]);
+        }
+        let appended = count(&mapped[rows..]);
+        drop(mapped);
+        t.readback.unmap();
+        Ok(appended)
     }
 
     /// Bring the GPU up to date: images made textures, the store's arrays sent — only what was
@@ -2596,6 +2632,100 @@ impl Player {
     }
 }
 
+/// An upload, checked and made as the store takes it from what its caller sends: so it can be
+/// made where it is sent from and stored where the player draws (`stage`).
+pub(crate) enum Upload {
+    Path { key: u64, points: Vec<[f64; 3]>, ranges: Vec<[u32; 4]>, centroid: [f32; 3], area: [f32; 3] },
+    Points { key: u64, vertices: Vec<[f32; 4]> },
+    Mesh { key: u64, vertices: Vec<[f32; 4]>, extras: Vec<[f32; 4]>, triangles: Vec<u32>, outline: u32, block: u32 },
+    Rows { key: u64, rows: Vec<[f32; 4]> },
+    Texture { key: u64, width: u32, height: u32, rgba: Vec<u8> },
+    Grow { key: u64, tail: Vec<[f64; 3]>, closed: bool },
+    Environment { id: u32, width: u32, height: u32, rgbe: Vec<u8> },
+}
+
+impl Upload {
+    /// A path: its control points (float64 x, y, z; four per curve), its subpaths (u32 first
+    /// curve, end curve, closed, 0) and (centroid, Newell area vector) of its control points.
+    pub(crate) fn path(key: u64, points: &[u8], subpaths: &[u8], centroid_area: [f32; 6]) -> Result<Self, String> {
+        check_key(key)?;
+        let points: Vec<[f64; 3]> = read(points, "points")?;
+        let ranges: Vec<[u32; 4]> = read(subpaths, "subpaths")?;
+        if !points.len().is_multiple_of(4) || ranges.iter().any(|r| r[0] >= r[1] || r[1] as usize > points.len() / 4) {
+            return Err("a path is whole curves, its subpaths ranges of them".into());
+        }
+        let [cx, cy, cz, ax, ay, az] = centroid_area;
+        Ok(Upload::Path { key, points, ranges, centroid: [cx, cy, cz], area: [ax, ay, az] })
+    }
+
+    /// A point cloud: positions (x, y, z, 0).
+    pub(crate) fn points(key: u64, vertices: &[u8]) -> Result<Self, String> {
+        check_key(key)?;
+        Ok(Upload::Points { key, vertices: read(vertices, "vertices")? })
+    }
+
+    /// A mesh as its object defines it: its points and texture coordinates (float64 x, y, z and
+    /// u, v), its triangles (three u32 each) and its normals (float64) when its geometry gives
+    /// them — a surface's spline, a flat face — or none, for the area-weighted sum of each
+    /// vertex's faces. `outline` > 2: the vertices are faces — blocks of `block` (by default
+    /// `outline`), each beginning with a closed loop of `outline` — stroked when drawn.
+    pub(crate) fn mesh(key: u64, points: &[u8], uvs: &[u8], normals: &[u8], triangles: &[u8], outline: u32, block: u32) -> Result<Self, String> {
+        check_key(key)?;
+        let mesh = Mesh::new(points, uvs, normals, triangles, outline, block)?;
+        let vertices = mesh.points.iter().zip(&*mesh.uvs).map(|(p, uv)| [p[0] as f32, p[1] as f32, p[2] as f32, uv[1] as f32]).collect();
+        let extras = mesh.normals.iter().zip(&*mesh.uvs).map(|(n, uv)| [n[0] as f32, n[1] as f32, n[2] as f32, uv[0] as f32]).collect();
+        Ok(Upload::Mesh { key, vertices, extras, triangles: mesh.triangles.into_owned(), outline: mesh.outline, block: mesh.block })
+    }
+
+    /// A brush of several rows (RGBA): gradient stops, or one color per point or vertex.
+    pub(crate) fn rows(key: u64, rows: &[u8]) -> Result<Self, String> {
+        check_key(key)?;
+        Ok(Upload::Rows { key, rows: read(rows, "rows")? })
+    }
+
+    /// An image: straight RGBA8 rows, top to bottom (premultiplied on the way in).
+    pub(crate) fn texture(key: u64, width: u32, height: u32, rgba: &[u8]) -> Result<Self, String> {
+        check_key(key)?;
+        if rgba.len() != (width * height * 4) as usize {
+            return Err("texture size does not match its bytes".into());
+        }
+        Ok(Upload::Texture { key, width, height, rgba: rgba.to_vec() })
+    }
+
+    /// Curves appended to a path: its last subpath continues with these control points (float64
+    /// x, y, z; four per curve); `closed`: whether that subpath now ends where it begins.
+    pub(crate) fn grow(key: u64, points: &[u8], closed: bool) -> Result<Self, String> {
+        let tail: Vec<[f64; 3]> = read(points, "points")?;
+        if !tail.len().is_multiple_of(4) {
+            return Err("a path grows by whole curves".into());
+        }
+        Ok(Upload::Grow { key, tail, closed })
+    }
+
+    /// An environment (an `EnvironmentLight`'s picture: equirectangular RGBE rows, top to
+    /// bottom), the id its views' lights give it.
+    pub(crate) fn environment(id: u32, width: u32, height: u32, rgbe: &[u8]) -> Result<Self, String> {
+        if rgbe.len() != (width * height * 4) as usize || width == 0 || height == 0 {
+            return Err("environment size does not match its bytes".into());
+        }
+        Ok(Upload::Environment { id, width, height, rgbe: rgbe.to_vec() })
+    }
+
+    /// The bytes it holds.
+    #[cfg(all(feature = "python", feature = "export"))]
+    pub(crate) fn size(&self) -> usize {
+        match self {
+            Upload::Path { points, ranges, .. } => size_of_val(&points[..]) + size_of_val(&ranges[..]),
+            Upload::Points { vertices, .. } => size_of_val(&vertices[..]),
+            Upload::Mesh { vertices, extras, triangles, .. } => size_of_val(&vertices[..]) + size_of_val(&extras[..]) + size_of_val(&triangles[..]),
+            Upload::Rows { rows, .. } => size_of_val(&rows[..]),
+            Upload::Texture { rgba, .. } => rgba.len(),
+            Upload::Grow { tail, .. } => size_of_val(&tail[..]),
+            Upload::Environment { rgbe, .. } => rgbe.len(),
+        }
+    }
+}
+
 /// What every host asks of a player: shapes, brushes and images uploaded once under a key, then
 /// frames drawn from views and records (see `python` and `web`).
 impl Player {
@@ -2623,59 +2753,51 @@ impl Player {
     /// A path: its control points (float64 x, y, z; four per curve), its subpaths (u32 first
     /// curve, end curve, closed, 0) and (centroid, Newell area vector) of its control points.
     pub(crate) fn add_path(&mut self, key: u64, points: &[u8], subpaths: &[u8], centroid_area: [f32; 6]) -> Result<(), String> {
-        check_key(key)?;
-        let points: Vec<[f64; 3]> = read(points, "points")?;
-        let ranges: Vec<[u32; 4]> = read(subpaths, "subpaths")?;
-        if !points.len().is_multiple_of(4) || ranges.iter().any(|r| r[0] >= r[1] || r[1] as usize > points.len() / 4) {
-            return Err("a path is whole curves, its subpaths ranges of them".into());
-        }
-        let [cx, cy, cz, ax, ay, az] = centroid_area;
-        self.store.add_path(key, &points, &ranges, [cx, cy, cz], [ax, ay, az]);
-        Ok(())
+        self.upload(Upload::path(key, points, subpaths, centroid_area)?)
     }
 
     /// A point cloud: positions (x, y, z, 0).
     pub(crate) fn add_points(&mut self, key: u64, vertices: &[u8]) -> Result<(), String> {
-        check_key(key)?;
-        self.store.add_points(key, &read(vertices, "vertices")?);
-        Ok(())
+        self.upload(Upload::points(key, vertices)?)
     }
 
-    /// A mesh as its object defines it: its points and texture coordinates (float64 x, y, z and
-    /// u, v), its triangles (three u32 each) and its normals (float64) when its geometry gives
-    /// them — a surface's spline, a flat face — or none, for the area-weighted sum of each
-    /// vertex's faces. `outline` > 2: the vertices are faces — blocks of `block` (by default
-    /// `outline`), each beginning with a closed loop of `outline` — stroked when drawn.
+    /// A mesh (see `Upload::mesh`).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn add_mesh(&mut self, key: u64, points: &[u8], uvs: &[u8], normals: &[u8], triangles: &[u8], outline: u32, block: u32) -> Result<(), String> {
-        check_key(key)?;
-        let mesh = Mesh::new(points, uvs, normals, triangles, outline, block)?;
-        let v: Vec<[f32; 4]> = mesh.points.iter().zip(&*mesh.uvs).map(|(p, uv)| [p[0] as f32, p[1] as f32, p[2] as f32, uv[1] as f32]).collect();
-        let e: Vec<[f32; 4]> = mesh.normals.iter().zip(&*mesh.uvs).map(|(n, uv)| [n[0] as f32, n[1] as f32, n[2] as f32, uv[0] as f32]).collect();
-        self.store.add_mesh(key, &v, &e, &mesh.triangles, mesh.outline, mesh.block);
-        Ok(())
+        self.upload(Upload::mesh(key, points, uvs, normals, triangles, outline, block)?)
     }
 
-    /// Append curves to a path: its last subpath continues with these control points (float64
-    /// x, y, z; four per curve); `closed`: whether that subpath now ends where it begins.
+    /// Append curves to a path (see `Upload::grow`).
     pub(crate) fn grow_path(&mut self, key: u64, points: &[u8], closed: bool) -> Result<(), String> {
-        let tail: Vec<[f64; 3]> = read(points, "points")?;
-        if !tail.len().is_multiple_of(4) {
-            return Err("a path grows by whole curves".into());
+        self.upload(Upload::grow(key, points, closed)?)
+    }
+
+    /// Store an upload made ready for it.
+    pub(crate) fn upload(&mut self, upload: Upload) -> Result<(), String> {
+        match upload {
+            Upload::Path { key, points, ranges, centroid, area } => self.store.add_path(key, &points, &ranges, centroid, area),
+            Upload::Points { key, vertices } => self.store.add_points(key, &vertices),
+            Upload::Mesh { key, vertices, extras, triangles, outline, block } => self.store.add_mesh(key, &vertices, &extras, &triangles, outline, block),
+            Upload::Rows { key, rows } => self.store.add_rows(key, &rows),
+            Upload::Texture { key, width, height, rgba } => {
+                if rgba.chunks_exact(4).all(|p| p[3] == 255) {
+                    self.opaque_images.insert(key, ());
+                }
+                self.images.insert(key, (width, height, rgba));
+            }
+            Upload::Grow { key, tail, closed } => return self.store.grow_path(key, &tail, closed),
+            Upload::Environment { id, width, height, rgbe } => {
+                self.environments.insert(id, environment::Environment::new(width, height, rgbe));
+            }
         }
-        self.store.grow_path(key, &tail, closed)
+        Ok(())
     }
 
     #[cfg(any(feature = "python", feature = "player"))]
-    /// Forget shapes, brushes and textures, except those queued export retries still need.
-    /// Return the accepted keys (unknown keys are ignored); the shapes' space is reused once
-    /// most of the store is dead. Refused keys may be offered again after their frames retire.
+    /// Forget shapes, brushes and textures (unknown keys are ignored): the shapes' space is
+    /// reused once most of the store is dead. A video's frames in flight that may be drawn again
+    /// must be settled first (`settle`).
     pub(crate) fn evict(&mut self, keys: Vec<u64>) -> Vec<u64> {
-        #[cfg(feature = "export")]
-        let keys = match &mut self.export {
-            Some(export) => export.evictable(keys),
-            None => keys,
-        };
         self.store.evict(&keys);
         for key in &keys {
             // a texture goes with its key (key 0, the white image, is never a texture's)
@@ -2688,22 +2810,16 @@ impl Player {
         keys
     }
 
-    #[cfg(feature = "python")]
-    /// (bytes in the store's arrays, of which dead).
-    pub(crate) fn stored(&self) -> (usize, usize) {
-        (self.store.bytes(), self.store.dead)
-    }
-
-    #[cfg(feature = "python")]
-    /// Whether retaining the current cache exceeds an individual GPU buffer's capacity.
-    pub(crate) fn pressured(&self, gpu: &Gpu) -> bool {
-        !self.store.fits(&gpu.device.limits())
-    }
-
     #[cfg(feature = "player")]
     /// Whether it holds `key`: a shape, brush or texture.
     pub(crate) fn has(&self, key: u64) -> bool {
         self.store.shapes.contains_key(&key) || self.store.brushes.contains_key(&key) || self.images.contains_key(&key)
+    }
+
+    #[cfg(all(feature = "python", feature = "export"))]
+    /// Whether what it holds fits a GPU buffer's binding (else each frame binds only what it draws).
+    pub(crate) fn fits(&self, limits: &wgpu::Limits) -> bool {
+        self.store.fits(limits)
     }
 
     #[cfg(feature = "player")]
@@ -2714,32 +2830,17 @@ impl Player {
 
     /// A brush of several rows (RGBA): gradient stops, or one color per point or vertex.
     pub(crate) fn add_rows(&mut self, key: u64, rows: &[u8]) -> Result<(), String> {
-        check_key(key)?;
-        self.store.add_rows(key, &read(rows, "rows")?);
-        Ok(())
+        self.upload(Upload::rows(key, rows)?)
     }
 
-    /// An image: straight RGBA8 rows, top to bottom (premultiplied on the way in).
+    /// An image (see `Upload::texture`).
     pub(crate) fn add_texture(&mut self, key: u64, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
-        check_key(key)?;
-        if rgba.len() != (width * height * 4) as usize {
-            return Err("texture size does not match its bytes".into());
-        }
-        if rgba.chunks_exact(4).all(|p| p[3] == 255) {
-            self.opaque_images.insert(key, ());
-        }
-        self.images.insert(key, (width, height, rgba.to_vec()));
-        Ok(())
+        self.upload(Upload::texture(key, width, height, rgba)?)
     }
 
-    /// An environment (an `EnvironmentLight`'s picture: equirectangular RGBE rows, top to bottom), the id its views'
-    /// lights give it.
+    /// An environment (see `Upload::environment`).
     pub(crate) fn add_environment(&mut self, id: u32, width: u32, height: u32, rgbe: &[u8]) -> Result<(), String> {
-        if rgbe.len() != (width * height * 4) as usize || width == 0 || height == 0 {
-            return Err("environment size does not match its bytes".into());
-        }
-        self.environments.insert(id, environment::Environment::new(width, height, rgbe.to_vec()));
-        Ok(())
+        self.upload(Upload::environment(id, width, height, rgbe)?)
     }
 
     /// A view's environment's diffuse light and its cube's unit (none: 0 and 1).

@@ -537,7 +537,6 @@ class Feeder:
         )  # the environment pictures the player has, by id
         # id(texture array) → (the array, its key): kept, so no other array takes its id
         self.textures: dict[int, tuple[np.ndarray, int]] = {}
-        self.texture_bytes: dict[int, int] = {}  # key → bytes, for the budget
         # id(read-only rows) → (rows, key)
         self.row_keys: dict[int, tuple[np.ndarray, int]] = {}
         # id(shape) → (shape, topology, uvs, steps, key, A): the mesh's upload inputs.
@@ -577,9 +576,9 @@ class Feeder:
         """Evict what no frame has shown for KEEP frames (frames mark what they show every MARK
         frames; the film holds back at most one frame). Memory pressure keeps only the latest
         frame and the records pinned by the caller, including every pending camera view.
-        The player also retains resources its queued export retries still need."""
-        stored, dead = self.player.stored()
-        pressed |= stored - dead + sum(self.texture_bytes.values()) > BUDGET
+        The player evicts in turn: after the frames sent before, and once its video's frames
+        in flight that may be drawn again are settled."""
+        pressed |= self.player.held() > BUDGET
         if self.frames - self.swept < SWEEP and not pressed:
             return
         for data in (*self.latest, *pinned):
@@ -593,18 +592,13 @@ class Feeder:
         # it is only forgotten
         resident = [k for k in stale if self.sizes.get(k, -1) != -1]
         if resident:
-            accepted = set(self.player.evict(resident))
-            blocked = set(resident) - accepted
-            stale = [key for key in stale if key not in blocked]
-        if not stale:
-            return
+            self.player.evict(resident)
         self.evictions += 1
         gone = set(stale)
         for key in stale:
             del self.last_used[key]
             self.sizes.pop(key, None)
             self.structures.pop(key, None)
-            self.texture_bytes.pop(key, None)
         # inputs of evicted resources are hashed again if shown again
         self.textures = {
             i: kept for i, kept in self.textures.items() if kept[1] not in gone
@@ -861,7 +855,6 @@ class Feeder:
             h, w = data.shape[:2]
             self.player.add_texture(key, w, h, data.tobytes())
             self.sizes[key] = 0
-            self.texture_bytes[key] = data.nbytes
         self.last_used[key] = self.frames
         if len(self.textures) > 1 << 8:
             self.textures.clear()

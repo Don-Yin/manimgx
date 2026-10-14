@@ -22,7 +22,10 @@ type CameraView = tuple[int, int, int, bytes, bytes]
 
 class Player:
     """The GPU's player (natively only: in Pyodide the engine has no GPU, and a film records a
-    take instead, with `Recorder`)."""
+    take instead, with `Recorder`). It runs on a thread of its own: each call is checked here
+    and carried out there, in order, so a call waits only for room in its queue and for what
+    it asks for (pixels, from `render` or `push` with `capture`; the video, from `end_export`).
+    Something going wrong there abandons its video and is raised at the next call."""
 
     def __init__(self, width: int, height: int, samples: int = 4) -> None: ...
     def add_path(
@@ -61,19 +64,23 @@ class Player:
         """Append curves (float64 control points, four per curve) to a path's last subpath;
         `closed`: whether it now ends where it begins."""
 
-    def evict(self, keys: Sequence[int]) -> list[int]:
-        """Forget resources except those needed by queued export retries; return the accepted keys."""
+    def evict(self, keys: Sequence[int]) -> None:
+        """Forget resources, once the video's frames in flight that may draw them again are
+        settled."""
 
-    def stored(self) -> tuple[int, int]:
-        """(bytes in the store's arrays, of which dead): what the arrays sent to the GPU hold."""
+    def held(self) -> int:
+        """The bytes it holds alive (shapes, brushes, textures), as of the calls carried
+        out."""
 
     def pressured(self) -> bool:
-        """Whether the resident arrays exceed a GPU buffer's capacity; brings up the GPU."""
+        """Whether what it holds outgrows a GPU buffer's binding, as of the calls carried
+        out (each frame then binds only what it draws)."""
 
     def render(
         self, view: bytes, records: bytes, cameras: Sequence[CameraView] = ...
     ) -> bytes:
-        """One frame, read back: RGBA8 rows, top to bottom."""
+        """One frame, drawn as the calls before it left the player, and read back: RGBA8 rows,
+        top to bottom."""
 
     def begin_export(
         self,
@@ -95,11 +102,11 @@ class Player:
         capture: bool = False,
     ) -> bytes | None:
         """The next frame of the video, shown for `repeat` frames; `key`: a keyframe, where a
-        player can start (a section's first frame). With `capture`, return the same draw's
-        full-quality RGBA8 pixels, waiting for any overflow retries."""
+        player can start (a section's first frame). With `capture`, wait for the same draw's
+        pixels (RGBA8 rows, top to bottom), once its retries are done, and return them."""
 
     def abort_export(self) -> None:
-        """Abandon the video: nothing is written."""
+        """Abandon the video: nothing is written (once this returns, nor any part of it)."""
 
     def end_export(
         self,
@@ -186,10 +193,10 @@ class Recorder:
         self, id: int, width: int, height: int, rgbe: bytes
     ) -> None: ...
     def grow_path(self, key: int, points: bytes, closed: bool = False) -> None: ...
-    def evict(self, keys: Sequence[int]) -> list[int]:
-        """Return all keys: the feeder may forget uploads retained by the take itself."""
-    def stored(self) -> tuple[int, int]:
-        """(0, 0): a take holds nothing on a GPU."""
+    def evict(self, keys: Sequence[int]) -> None:
+        """Nothing: a take keeps the uploads its frames need itself."""
+    def held(self) -> int:
+        """0: a take holds nothing on a GPU."""
 
     def frame(
         self,
