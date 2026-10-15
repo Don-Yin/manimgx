@@ -1,7 +1,7 @@
 # The docs site, on Cloudflare Workers (.github/deploy/docs.jsonc): built on every push and
-# pull request, and deployed from main to https://manimgx.academa.ai. The build gets no
-# secrets. The deploy uses main's deployment configuration, checked out separately from the
-# artifact, which contains only the built site.
+# pull request, deployed from main to https://manimgx.academa.ai, and previewed per pull request.
+# The build gets no secrets. Publishing uses the base branch's deployment configuration,
+# checked out separately from the artifact, which contains only the built site.
 
 name: Deploy docs
 
@@ -9,6 +9,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
 
 permissions: {}
@@ -24,6 +25,7 @@ env:
 jobs:
   build:
     name: Build
+    if: github.event.action != 'closed'
     runs-on: macos-26
     # A cold build compiles the engine and renders the full gallery before hundreds of
     # short API examples. Measured cold work exceeds 45 minutes; warm builds reuse films.
@@ -137,6 +139,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
           persist-credentials: false
           sparse-checkout: .github/deploy
           sparse-checkout-cone-mode: false
@@ -155,3 +158,81 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+
+  preview:
+    name: Preview
+    needs: build
+    # pull requests from forks and from Dependabot get no secrets: they are built, not previewed
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    environment:
+      name: docs-preview
+      url: ${{ steps.preview.outputs.url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/deploy
+          sparse-checkout-cone-mode: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: docs
+          path: docs/site
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - name: Preview the site
+        id: preview
+        run: |
+          bunx "wrangler@${WRANGLER_VERSION}" preview --config .github/deploy/docs.jsonc \
+            --name "pr-${PR_NUMBER}" --message "${HEAD_SHA}"
+          url="$(jq -er 'select(.type == "preview") | .preview_urls[0]' "${WRANGLER_OUTPUT_FILE_PATH}")"
+          echo "url=${url}" >> "${GITHUB_OUTPUT}"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_OUTPUT_FILE_PATH: ${{ runner.temp }}/wrangler.ndjson
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+
+  delete-preview:
+    name: Delete the ${{ matrix.site }} preview
+    if: >-
+      github.event.action == 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        site: [docs, coverage]
+    permissions:
+      contents: read
+    environment:
+      name: ${{ matrix.site }}-preview
+      deployment: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
+          persist-credentials: false
+          sparse-checkout: .github/deploy
+          sparse-checkout-cone-mode: false
+
+      - name: Delete the preview
+        # Only an absent preview is ignored; authentication and API failures fail the job.
+        run: python3 .github/deploy/cleanup.py
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER: manimgx-${{ matrix.site }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}

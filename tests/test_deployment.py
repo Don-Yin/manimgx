@@ -1,21 +1,26 @@
-"""Deployment credentials reach only main, with its own configuration, and nothing is
-previewed."""
+"""Deployment credentials see trusted configuration and failures stay visible."""
 
-import re
+import io
+import json
+import runpy
+import urllib.request
+from http.client import HTTPMessage
 from pathlib import Path
+from typing import Never
+from urllib.error import HTTPError
+from urllib.request import Request
 
 import pytest
 import yaml
 
 ROOT = Path(__file__).parents[1]
-WORKFLOWS = {
-    path.stem: yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]
-    for path in sorted((ROOT / ".github/workflows").glob("*.yaml"))
-}
+CLEANUP = ROOT / ".github/deploy/cleanup.py"
 
 
 def test_docs_snapshots_can_resume_failures_and_save_repairs() -> None:
-    steps = WORKFLOWS["deploy-docs"]["build"]["steps"]
+    steps = yaml.safe_load(
+        (ROOT / ".github/workflows/deploy-docs.yaml").read_text(encoding="utf-8")
+    )["jobs"]["build"]["steps"]
     restore, save = [
         step for step in steps if step.get("uses", "").startswith("actions/cache/")
     ]
@@ -42,17 +47,68 @@ def test_docs_snapshots_can_resume_failures_and_save_repairs() -> None:
     assert "steps.completed.outputs.state != steps.restored.outputs.state" in condition
 
 
+@pytest.mark.parametrize("status", [401, 403, 429, 500])
+def test_cleanup_does_not_hide_api_failures(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    def rejected(request: Request, timeout: int) -> Never:
+        raise HTTPError(request.full_url, status, "rejected", HTTPMessage(), None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", rejected)
+    delete = runpy.run_path(str(CLEANUP))["delete_preview"]
+    with pytest.raises(HTTPError) as error:
+        delete("account", "manimgx-docs", "pr-42", "test-token")
+    assert error.value.code == status
+
+
+def test_cleanup_of_a_preview_that_never_existed_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing(request: Request, timeout: int) -> Never:
+        raise HTTPError(request.full_url, 404, "not found", HTTPMessage(), None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", missing)
+    delete = runpy.run_path(str(CLEANUP))["delete_preview"]
+    delete("account", "manimgx-docs", "pr-42", "test-token")
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_cleanup_requires_confirmation_and_deletes_only_the_named_preview(
+    monkeypatch: pytest.MonkeyPatch, success: bool
+) -> None:
+    def respond(request: Request, timeout: int) -> io.BytesIO:
+        assert request.method == "DELETE"
+        assert request.full_url == (
+            "https://api.cloudflare.com/client/v4/accounts/account/"
+            "workers/workers/manimgx-docs/previews/pr-42"
+        )
+        assert request.get_header("Authorization") == "Bearer test-token"
+        assert timeout == 30
+        return io.BytesIO(json.dumps({"success": success}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", respond)
+    delete = runpy.run_path(str(CLEANUP))["delete_preview"]
+    if success:
+        delete("account", "manimgx-docs", "pr-42", "test-token")
+    else:
+        with pytest.raises(RuntimeError, match="did not confirm"):
+            delete("account", "manimgx-docs", "pr-42", "test-token")
+
+
 @pytest.mark.parametrize(
     ("workflow", "build", "publish", "assets"),
     [
         ("deploy-docs", "build", "deploy", "docs/site"),
+        ("deploy-docs", "build", "preview", "docs/site"),
         ("test", "coverage", "publish-coverage", "htmlcov"),
     ],
 )
 def test_build_artifacts_cannot_supply_the_deployment_configuration(
     workflow: str, build: str, publish: str, assets: str
 ) -> None:
-    jobs = WORKFLOWS[workflow]
+    jobs = yaml.safe_load(
+        (ROOT / f".github/workflows/{workflow}.yaml").read_text(encoding="utf-8")
+    )["jobs"]
     upload = next(
         step["with"]
         for step in jobs[build]["steps"]
@@ -65,7 +121,7 @@ def test_build_artifacts_cannot_supply_the_deployment_configuration(
         for step in steps
         if step.get("uses", "").startswith("actions/checkout@")
     )
-    assert "ref" not in checkout  # the configuration of the commit it publishes, main's
+    assert checkout["ref"] == "${{ github.event.pull_request.base.sha || github.sha }}"
     assert checkout["sparse-checkout"] == ".github/deploy"
     assert checkout["persist-credentials"] is False
     download = next(
@@ -78,33 +134,3 @@ def test_build_artifacts_cannot_supply_the_deployment_configuration(
     # replace the trusted configuration at the workspace root.
     injected_config = ROOT / download["path"] / ".github/deploy/docs.jsonc"
     assert not injected_config.is_relative_to(ROOT / ".github/deploy")
-
-
-def test_only_main_gets_the_deployment_credentials() -> None:
-    credentialed = {
-        (workflow, name): job
-        for workflow, jobs in WORKFLOWS.items()
-        for name, job in jobs.items()
-        if "secrets.CLOUDFLARE_API_TOKEN" in str(job)
-    }
-    assert set(credentialed) == {
-        ("deploy-docs", "deploy"),
-        ("test", "publish-coverage"),
-    }
-    for job in credentialed.values():
-        assert "github.ref == 'refs/heads/main'" in job["if"]
-        # the production environments, which admit only main
-        assert job["environment"]["name"] in {"docs", "coverage"}
-
-
-def test_nothing_is_previewed() -> None:
-    for jobs in WORKFLOWS.values():
-        for job in jobs.values():
-            assert "preview" not in str(job.get("environment", ""))
-            for step in job.get("steps", []):
-                assert not re.search(r"wrangler\S*\s+preview\b", step.get("run", ""))
-    # nor is any version of a site served on workers.dev
-    for site in ("docs", "coverage"):
-        config = (ROOT / f".github/deploy/{site}.jsonc").read_text(encoding="utf-8")
-        assert re.search(r'"preview_urls":\s*false', config)
-        assert '"previews"' not in config

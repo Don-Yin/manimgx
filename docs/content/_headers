@@ -14,3 +14,7 @@
 
 /assets/stylesheets/*
   Cache-Control: public, max-age=31536000, immutable
+
+# workers.dev hosts (previews, and the site until it has its domain) stay out of search results
+https://:version.:subdomain.workers.dev/*
+  X-Robots-Tag: noindex

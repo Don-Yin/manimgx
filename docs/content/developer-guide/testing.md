@@ -320,10 +320,12 @@ in the ones they start (the corpus renders each case in its own), with paths rel
 the repository, so that runs on different systems combine: `just combine-coverage <folder>`
 makes one report of their data files.
 
-The Test workflow combines the coverage of its runs into one report, whose table is in the
-run's summary, and publishes `main`'s, served by Cloudflare as
+The Test workflow combines the coverage of its runs and publishes the report, served by
+Cloudflare as
 [`.github/deploy/coverage.jsonc`](https://github.com/academa-labs/manimgx/blob/main/.github/deploy/coverage.jsonc)
-says, at <https://coverage.manimgx.academa.ai>.
+says: `main`'s at <https://coverage.manimgx.academa.ai>, a pull request's (from a branch of
+this repository) at a preview address, and each commit's linked from its "coverage"
+status.
 
 ## Benchmarks
 

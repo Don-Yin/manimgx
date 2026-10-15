@@ -13,7 +13,9 @@
   },
   // Academa's internal/manimgx-hosting Terraform unit owns the domain and Worker identity.
   "workers_dev": false,
-  // the domain is the only address: no version is served on workers.dev either
-  "preview_urls": false,
+  // a pull request is previewed at pr-<number>-manimgx-docs.<account subdomain>.workers.dev
+  // (set explicitly because `workers_dev` is disabled)
+  "preview_urls": true,
+  "previews": {},
   "observability": { "enabled": true }
 }

@@ -7,6 +7,9 @@
   "assets": { "directory": "../../htmlcov" },
   // Academa's internal/manimgx-hosting Terraform unit owns the domain and Worker identity.
   "workers_dev": false,
-  // the domain is the only address: no version is served on workers.dev either
-  "preview_urls": false
+  // each commit's report is a deployment in the preview "main" or "pr-<number>", at
+  // <preview>-manimgx-coverage.<account subdomain>.workers.dev; Cloudflare retains their
+  // deployment history within the account plan's preview limits
+  "preview_urls": true,
+  "previews": {}
 }
