@@ -564,7 +564,8 @@ class Feeder:
         self.swept = 0
         # sweeps that evicted: a record made since draws only what is resident
         self.evictions = 0
-        self.latest: list[bytes] = []  # the records of the last frame made
+        # the records of the film's last frame made, and of its camera views (not a picture's)
+        self.latest: list[bytes] = []
 
     # ── residency ────────────────────────────────────────────────────────────
     def shown(self, records: np.ndarray, last: int) -> None:
@@ -872,12 +873,26 @@ class Feeder:
     def frame(
         self, camera: "Camera", mobjects: "list[Mobject]"
     ) -> tuple[bytes, bytes, list[CameraView]]:
-        """(view, records, camera views to draw first) — the arguments of `Player.render`."""
+        """(view, records, camera views to draw first) of the film's next frame: the arguments
+        of `Player.render`. It is the latest frame, which the film may hold back (see `sweep`).
+        """
+        uniform, records, cameras = self.picture(camera, mobjects)
+        self.latest = [records, *[c[4] for c in cameras]]
+        if self.frames % MARK == 0:
+            for data in self.latest:
+                self.shown(np.frombuffer(data, RECORD), self.frames)
+        self.frames += 1
+        return uniform, records, cameras
+
+    def picture(
+        self, camera: "Camera", mobjects: "list[Mobject]"
+    ) -> tuple[bytes, bytes, list[CameraView]]:
+        """(view, records, camera views to draw first) of the world now, drawn at once: not a
+        frame of the film, so the latest frame, which the film may still hold back, stays the
+        one a sweep keeps."""
         self.sweep()
-        self.latest = []
         cameras: list[CameraView] = []
         uniform, records = self.view(camera, mobjects, self.width, self.height, cameras)
-        self.frames += 1
         return uniform, records, cameras
 
     def camera_view(
@@ -924,10 +939,6 @@ class Feeder:
                 )
             ]
         )
-        if data:
-            self.latest.append(data)
-            if self.frames % MARK == 0:
-                self.shown(np.frombuffer(data, RECORD), self.frames)
         return uniform, data
 
     def record(

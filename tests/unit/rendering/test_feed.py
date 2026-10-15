@@ -11,6 +11,9 @@ keeps the player's store in step with its own books; the player derives what dra
 - A record's reveal window is over u, which counts its shape's steps: a path's curves, a
   cloud's points, a mesh's triangles, a surface's faces.
 - A surface's part uploads the faces it draws, cut from its whole lattice as it draws them.
+- A picture (a storyboard's) is not one of the film's frames: drawn between them, it leaves
+  the latest frame, which the film may still hold back, the one a sweep keeps, and the count
+  of frames as it was.
 - A batch of a reveal's frames has each frame's window, as the frame alone would.
 - A path and a cloud of points drawn in one frame draw as each does alone.
 - Over any run of frames of any mobjects (paths, graded paths, colored clouds and meshes,
@@ -921,3 +924,16 @@ class Residency(RuleBasedStateMachine):
 
 TestResidency = Residency.TestCase
 TestResidency.settings = settings(max_examples=60, stateful_step_count=40)
+
+
+def test_a_picture_is_not_one_of_the_films_frames() -> None:
+    sink = Sink()
+    feeder = feed.Feeder(32, 32, sink)  # ty: ignore[invalid-argument-type]
+    camera = m.Camera()
+    feeder.frame(camera, [m.Square(fill_opacity=1)])
+    held = set(sink.resident)
+    frames, latest = feeder.frames, feeder.latest
+    feeder.picture(camera, [m.RegularPolygon(5, fill_opacity=1)])
+    assert (feeder.frames, feeder.latest) == (frames, latest)
+    feeder.sweep(pressed=True)  # the picture's shapes may go: never the held frame's
+    assert held <= set(sink.resident)

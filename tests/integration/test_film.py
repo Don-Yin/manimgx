@@ -1,5 +1,6 @@
 """A film's hooks: each frame handed over as it is sent, and `Cut`, which ends the film wherever
-a hook raises it — at its last frame too, which is sent only when the film closes."""
+a hook raises it — at its last frame too, which is sent only when the film closes. A storyboard's
+picture drawn between frames keeps what the frame the film holds back draws."""
 
 from collections.abc import Callable
 from pathlib import Path
@@ -9,7 +10,8 @@ import pytest
 
 import manimgx as m
 from manimgx.config import config
-from manimgx.rendering.film import Cut, Frame, X264Preset
+from manimgx.rendering import feed
+from manimgx.rendering.film import Cut, Film, Frame, X264Preset
 
 
 class Held(m.Scene):
@@ -88,3 +90,21 @@ def test_an_invalid_crf_fails_before_writing(tmp_path: Path, crf: float) -> None
     ):
         Held().render(tmp_path / "bad.mp4", crf=crf)
     assert list(tmp_path.iterdir()) == []
+
+
+def test_a_storyboards_picture_between_frames_keeps_what_the_held_frame_draws(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`manimgx inspect` draws a storyboard's picture between a film's frames. Had the picture
+    taken the place of the frame the film holds back, the sweep before the next frame would
+    evict what that frame draws, and drawing it would fail with "unknown shape"."""
+    monkeypatch.setattr(feed, "KEEP", 0)  # what no frame shows now goes at a sweep
+    monkeypatch.setattr(feed, "SWEEP", 1)  # and there is a sweep at every frame
+    drawn: list[bytes] = []
+    film = Film(frames=lambda frame: drawn.append(frame.pixels()))
+    camera = m.Camera()
+    film.record(camera, [m.Square(fill_opacity=1)])  # held back until the next frame
+    film.picture(camera, [m.Circle(fill_opacity=1)])
+    film.record(camera, [m.Triangle(fill_opacity=1)])  # sends the square's frame
+    film.close()
+    assert len(drawn) == 2

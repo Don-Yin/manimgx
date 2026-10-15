@@ -417,7 +417,7 @@ class Film:
         Returns:
             Its pixels: RGBA, a byte a channel, row after row from the top.
         """
-        view, records, cameras = self.feeder.frame(camera, mobjects)
+        view, records, cameras = self.feeder.picture(camera, mobjects)
         if self._player is None:
             raise RuntimeError("a film recorded as a take is drawn by ManimGX's player")
         if self._player.pressured():
