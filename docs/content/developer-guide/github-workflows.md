@@ -10,8 +10,8 @@ Some tasks must run the same way every time:
 - **For every release:** test; build the wheels, the source distribution, the font
   packages and the executables; publish them to GitHub and PyPI, the package for the
   browser to npm, and the Docker image to ghcr.io.
-- **For every pull request and issue:** a review once a pull request is ready, and an
-  assistant that a maintainer can ask.
+- **When a maintainer mentions @claude**, in an issue or a pull request: an answer, a
+  review or a change, by Claude.
 - **When a maintainer requests an update:** review and update pinned actions and dependencies.
 
 Done by hand, steps get forgotten, and every run costs someone's time.
@@ -254,22 +254,17 @@ runs on a Claude subscription, whose token is the `ai` environment's secret
 `CLAUDE_CODE_OAUTH_TOKEN`. `claude setup-token` makes one, good for a year; a maintainer
 makes the next before it expires.
 
-**When it runs:** a pull request is opened or marked ready for review, an issue is opened,
-or a comment is made on an issue or a pull request.
+**When it runs:** only when a maintainer mentions @claude, in a new issue or in a comment
+on an issue or a pull request. Nothing runs on its own: a pull request is reviewed when
+someone asks for it.
 
-**What it does**, in two ways:
-
-- **A review** of a pull request from a branch of the repository (not a draft, and not a
-  bot's), when it is opened or marked ready: Anthropic's code-review plugin, with Claude
-  Opus, comments on the problems it is sure of.
-- **@claude:** a maintainer mentions @claude in a new issue, or in a comment on an issue or
-  a pull request, and asks for anything: an answer, a review, a change. The job first
-  checks that the author can write to the repository, and stops otherwise. Claude Opus
-  works in the environment `just sync` makes, in Claude Code's auto mode: it runs any
-  command a classifier allows, with no list of commands to keep. It is told to follow
-  [`AGENTS.md`](https://github.com/academa-labs/manimgx/blob/main/AGENTS.md), to run
-  `just check` and the tests its change touches before it pushes, and to open a change as
-  a draft pull request. On a pull request from a fork, it only reads.
+**What it does:** whatever it is asked: an answer, a review, a change. The job first checks
+that the author can write to the repository, and stops otherwise. Claude Opus works in the
+environment `just sync` makes, in Claude Code's auto mode: it runs any command a classifier
+allows, with no list of commands to keep. It is told to follow
+[`AGENTS.md`](https://github.com/academa-labs/manimgx/blob/main/AGENTS.md), to run
+`just check` and the tests its change touches before it pushes, and to open a change as a
+draft pull request. On a pull request from a fork, it only reads.
 
 ## Deployment credentials
 
