@@ -520,12 +520,13 @@ fn settle(py: Python<'_>) {
 
 /// Open ManimGX's player in a window on this machine's screen, playing the takes that come on
 /// standard input (see `window`), until the window is closed or its input ends. It starts at
-/// `time` seconds; its text is set in the fonts under `fonts`.
+/// `time` seconds; its text is set in the fonts under `fonts`. Presenting, the film's sections
+/// are slides: it stops at each one's end until its viewer goes on.
 #[cfg(feature = "window")]
 #[pyfunction]
-#[pyo3(signature = (title, time = 0.0, fonts = Vec::new()))]
-fn window(py: Python<'_>, title: String, time: f64, fonts: Vec<String>) -> PyResult<()> {
-    py.detach(|| crate::window::run(crate::window::Options { title, time, fonts })).map_err(PyRuntimeError::new_err)
+#[pyo3(signature = (title, time = 0.0, fonts = Vec::new(), present = false))]
+fn window(py: Python<'_>, title: String, time: f64, fonts: Vec<String>, present: bool) -> PyResult<()> {
+    py.detach(|| crate::window::run(crate::window::Options { title, time, fonts, present })).map_err(PyRuntimeError::new_err)
 }
 
 #[pymodule]

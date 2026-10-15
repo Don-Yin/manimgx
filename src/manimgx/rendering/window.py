@@ -40,16 +40,21 @@ class Window:
     Args:
         title: The window's title.
         time: Where its playhead starts, in seconds.
+        present: Whether it presents the film: its sections are slides, and it stops at
+            each one's end until its viewer goes on (the keys of `manimgx present`), telling
+            the presenter each slide's notes on standard error.
     """
 
-    def __init__(self, title: str = "ManimGX", *, time: float = 0.0) -> None:
+    def __init__(
+        self, title: str = "ManimGX", *, time: float = 0.0, present: bool = False
+    ) -> None:
         self._process = subprocess.Popen(
             [
                 sys.executable,
                 "-c",
                 "from manimgx.rendering.window import _main; _main()",
             ]
-            + [title, repr(float(time))],
+            + [title, repr(float(time)), "present" if present else "play"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
         )
@@ -174,9 +179,9 @@ def _main() -> None:
 
     # Ctrl+C reaches every process of the terminal: the window's director closes it
     signal.signal(signal.SIGINT, signal.SIG_IGN)
-    title, time = sys.argv[1], float(sys.argv[2])
+    title, time, present = sys.argv[1], float(sys.argv[2]), sys.argv[3] == "present"
     try:
-        _engine.window(title, time, list(FONTS))
+        _engine.window(title, time, list(FONTS), present)
     except BaseException as failed:  # a panic of the engine's too
         print(json.dumps({"failure": str(failed) or type(failed).__name__}), flush=True)
         sys.exit(1)

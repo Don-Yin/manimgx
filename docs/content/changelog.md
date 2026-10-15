@@ -25,6 +25,9 @@ The notable changes to ManimGX, release by release. The format follows
 
 ### Changed
 
+- `manimgx present` presents in a window of its own, as `manimgx preview` plays a scene: it
+  stops at each slide's end, and the terminal shows each slide's notes. `--page` writes the
+  video and the page, as it did before.
 - Show measured render times in a static benchmark chart.
 - Use a Markdown table for the benchmark comparison images.
 - Install ManimGX in the Quickstart with one command, `pip install manimgx`, and run `manimgx` directly throughout the docs.

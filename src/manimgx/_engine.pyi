@@ -223,10 +223,14 @@ def web() -> tuple[str, bytes] | None:
     plays in a window: `window`), or one built without it (no wasm32-unknown-unknown target).
     """
 
-def window(title: str, time: float = 0.0, fonts: Sequence[str] = ...) -> None:
+def window(
+    title: str, time: float = 0.0, fonts: Sequence[str] = ..., present: bool = False
+) -> None:
     """Open ManimGX's player in a window on this machine's screen, playing the takes that come
     on standard input, until the window is closed or its input ends. It starts at `time`
-    seconds; its text is set in the fonts under `fonts`. Natively only."""
+    seconds; its text is set in the fonts under `fonts`. Presenting, the film's sections are
+    slides: it stops at each one's end until its viewer goes on, and tells the presenter each
+    slide's notes on standard error. Natively only."""
 
 def digest(*parts: bytes) -> int:
     """The content key of the parts' bytes, taken as one stream (xxh3, 64 bits, never 0): what

@@ -3,7 +3,7 @@ and previewed live.
 
     manimgx render scene.py [Scene] [-o video.mp4]      the video, a storyboard, layout problems
     manimgx inspect scene.py [Scene] [-t 0,2.5,end]    timeline, storyboard, layout problems
-    manimgx present scene.py [Scene]                    its sections as slides, in the browser
+    manimgx present scene.py [Scene]                    its sections as slides, in a window
     manimgx preview scene.py [Scene]                    a window playing it, again on each save
 
 What a command writes goes to stdout, one line per file, then its report; errors go to stderr.
@@ -16,10 +16,12 @@ import sys
 from manimgx import _engine
 
 # A command that draws starts the GPU before the rest of the command line loads (its modules,
-# then the scene's file), so that the GPU comes up meanwhile; `--version`, `--help` and
-# `preview` (its window draws its takes) never bring it up.
-DRAWING = ("render", "inspect", "present")
-if sys.argv[1:2] and sys.argv[1] in DRAWING and not {"-h", "--help"} & set(sys.argv):
+# then the scene's file), so that the GPU comes up meanwhile; `--version`, `--help`,
+# `preview` and `present` in a window (their window draws their takes) never bring it up.
+DRAWING = ("render", "inspect")
+command = sys.argv[1] if sys.argv[1:2] else None
+drawing = command in DRAWING or (command == "present" and "--page" in sys.argv)
+if drawing and not {"-h", "--help"} & set(sys.argv):
     _engine.start_gpu()
 
 from importlib.metadata import version

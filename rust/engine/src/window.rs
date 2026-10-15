@@ -3,9 +3,11 @@
 //! output (`{"scene": "Name"}`). It closes when it is closed, or its director goes.
 //!
 //! What a window adds to the player is the window: winit's events in the player's words (the web's,
-//! which winit's own follow), its size, title, cursor and full screen.
+//! which winit's own follow), its size, title, cursor and full screen. Presenting, it tells the
+//! presenter each slide on standard error, the terminal it was started from: the slide's number
+//! and name, its notes, the next slide, and how long the talk has run.
 
-use std::io::{Read, Write};
+use std::io::{IsTerminal, Read, Write};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,7 +19,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy}
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{CursorIcon, Fullscreen, Window, WindowId};
 
-use crate::player::{self, Ask, Cursor, Modifiers, Player, Screen, Wake};
+use crate::player::{self, Ask, Cursor, Modifiers, Player, Screen, Slide, Wake};
 use crate::render::with_gpu;
 use crate::text::Fonts;
 
@@ -26,6 +28,7 @@ pub(crate) struct Options {
     pub(crate) title: String,
     pub(crate) time: f64,          // where the playhead starts, seconds
     pub(crate) fonts: Vec<String>, // the font directories its face is set in
+    pub(crate) present: bool,      // the film's sections are slides (see `player::Deck`)
 }
 
 /// What wakes the event loop: the director's bytes, or its end.
@@ -70,6 +73,26 @@ struct App {
     failed: Option<String>,
 }
 
+/// Tell the presenter of the slide shown, on the terminal (cleared first, so that it shows the
+/// slide alone): its number (of how many, once the film is all made), its name, how long the talk
+/// has run; its notes; the next slide's name.
+fn tell(slide: &Slide) {
+    let mut out = std::io::stderr().lock();
+    if std::io::stderr().is_terminal() {
+        let _ = write!(out, "\x1b[2J\x1b[H");
+    }
+    let of = slide.count.map_or_else(String::new, |n| format!(" / {n}"));
+    let since = slide.since.map_or_else(String::new, |d| format!("   {}:{:02}", d.as_secs() / 60, d.as_secs() % 60));
+    let _ = writeln!(out, "{}{of}   {}{since}\n", slide.number, slide.name);
+    if !slide.notes.is_empty() {
+        let _ = writeln!(out, "{}\n", slide.notes.trim_end());
+    }
+    if let Some(next) = &slide.next {
+        let _ = writeln!(out, "Next: {next}");
+    }
+    let _ = out.flush();
+}
+
 /// A key as the web names it (and winit's names follow): a character, or `"ArrowLeft"`, `" "`…
 fn named(key: &Key) -> Option<String> {
     match key {
@@ -100,6 +123,7 @@ impl App {
                     window.set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
                     player.fullscreen(on);
                 }
+                Ask::Slide(slide) => tell(&slide),
             }
         }
         let cursor = player.cursor();
@@ -139,6 +163,9 @@ impl ApplicationHandler<Event> for App {
         let room = event_loop.primary_monitor().map_or(LogicalSize::new(1440.0, 900.0), |m| m.size().to_logical::<f64>(m.scale_factor()));
         let k = (room.width * 2.0 / 3.0 / 16.0).min(room.height * 2.0 / 3.0 / 9.0);
         let attributes = Window::default_attributes().with_title(&self.options.title).with_inner_size(LogicalSize::new(16.0 * k, 9.0 * k)).with_min_inner_size(LogicalSize::new(320.0, 180.0));
+        // presenting, a click goes on: the click that brings the window forward does not
+        #[cfg(target_os = "macos")]
+        let attributes = winit::platform::macos::WindowAttributesExtMacOS::with_accepts_first_mouse(attributes, !self.options.present);
         let made = event_loop.create_window(attributes).map_err(|e| e.to_string()).and_then(|window| {
             let window = Arc::new(window);
             let size = window.inner_size();
@@ -146,7 +173,8 @@ impl ApplicationHandler<Event> for App {
                 let surface = gpu.instance.create_surface(window.clone()).map_err(|e| e.to_string())?;
                 Screen::new(gpu, surface, (size.width, size.height))
             })??;
-            let options = player::Options { time: self.options.time, playing: true, mac: cfg!(target_os = "macos") };
+            let present = self.options.present;
+            let options = player::Options { time: self.options.time, playing: !present, mac: cfg!(target_os = "macos"), present };
             let mut player = Player::new(screen, self.fonts.clone(), options);
             player.resize(size.width, size.height, window.scale_factor() as f32);
             if let Some(millihertz) = window.current_monitor().and_then(|m| m.refresh_rate_millihertz()) {

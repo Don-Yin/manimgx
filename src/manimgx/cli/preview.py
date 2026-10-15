@@ -63,14 +63,29 @@ def preview(
     last good picture. A file of several scenes plays the one named, or its first; N and P go
     to the others. Keys: Space play/pause, ← → 5 s, , . a frame, Option (or Ctrl) with ← → a
     play, ? all of them. Closing the window, or Ctrl+C, stops."""
+    play(file, name, time_, resolution, fps)
+
+
+def play(
+    file: Path,
+    name: str | None,
+    start: float,
+    resolution: Size | None,
+    fps: int | None,
+    *,
+    present: bool = False,
+) -> None:
+    """Play the scene in a window from `start` seconds, made again each time its code is
+    saved, until the window is closed (or Ctrl+C): `preview`; presenting, `present`, whose
+    window stops at each slide's end and tells the terminal each slide's notes."""
     if not file.is_file():
         raise fail(f"error: {file}: no such file")
-    with Window(f"{file.name} — ManimGX", time=time_) as window:
+    with Window(f"{file.name} — ManimGX", time=start, present=present) as window:
         try:
             files = [file]
             while window.open:
                 news = News(files, window)  # the files as this run reads them
-                files = run(file, name, resolution, fps, window, news)
+                files = run(file, name, resolution, fps, window, news, quiet=present)
                 news.watch(files)
                 while window.open and not news():
                     time.sleep(POLL)
@@ -118,9 +133,12 @@ def run(
     fps: int | None,
     window: Window,
     news: News,
+    *,
+    quiet: bool = False,
 ) -> list[Path]:
     """Run the scene once, its take (or its error) into `window`, and cut it once `news`
-    makes it out of date. Returns the files to watch: the scene's, and the modules it imported
+    makes it out of date; `quiet`, it says nothing of a run that went well (the terminal is
+    the presenter's). Returns the files to watch: the scene's, and the modules it imported
     from beside it."""
     root = file.resolve().parent
     started = time.perf_counter()
@@ -144,11 +162,12 @@ def run(
             config.frame_rate = look.fps
             film = kind().render(take=take)
             cut = "cut: " if news.any or not window.open else ""
-            typer.echo(
-                f"{kind.__name__}: {cut}{film.frame_count} frames in"
-                f" {time.perf_counter() - started:.2f} s",
-                err=True,
-            )
+            if not quiet:
+                typer.echo(
+                    f"{kind.__name__}: {cut}{film.frame_count} frames in"
+                    f" {time.perf_counter() - started:.2f} s",
+                    err=True,
+                )
         except Exception as error:
             text = str(error) if isinstance(error, Mistake) else report_error(error)
             typer.echo(text, err=True)

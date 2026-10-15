@@ -40,7 +40,8 @@ pub(crate) struct Face {
     pub(crate) status: Option<String>, // no picture yet: what the player waits for
     pub(crate) error: Option<String>,
     pub(crate) help: bool,
-    pub(crate) mac: bool, // a Mac's keys (Option, not Ctrl)
+    pub(crate) mac: bool,  // a Mac's keys (Option, not Ctrl)
+    pub(crate) deck: bool, // presenting: the keys are a presentation's
 }
 
 /// A control of the face: what is there to point at.
@@ -69,6 +70,19 @@ const KEYS: [(&str, &str); 14] = [
     ("c", "captions"),
     ("f", "full screen"),
     ("N   P", "the file's next, previous scene"),
+    ("?", "these keys"),
+];
+
+/// A presentation's keys, as the help lists them: its page's, which a clicker sends too.
+const DECK_KEYS: [(&str, &str); 9] = [
+    ("→   Space   PageDown", "next"),
+    ("←   PageUp", "back"),
+    ("Home   End", "the first slide, the end"),
+    ("1  …  9   Enter", "the slide of that number"),
+    ("f", "full screen"),
+    ("b", "black"),
+    ("c", "captions"),
+    ("m", "mute"),
     ("?", "these keys"),
 ];
 
@@ -284,14 +298,15 @@ impl Chrome {
     }
 
     /// The keys, as a table: each key bold and to the right, what it does to the left.
-    fn keys(&mut self, mac: bool) -> Result<Rc<Label>, String> {
+    fn keys(&mut self, mac: bool, deck: bool) -> Result<Rc<Label>, String> {
         let chapter = if mac { "Option" } else { "Ctrl" };
-        self.label(format!("keys {mac}"), |fonts| {
+        let table: &[(&str, &str)] = if deck { &DECK_KEYS } else { &KEYS };
+        self.label(format!("keys {mac} {deck}"), |fonts| {
             let (size, row, gap) = (13.0, 21.0, 16.0);
-            let keys: Vec<Line> = KEYS.iter().map(|(k, _)| fonts.line(&k.replace("{}", chapter), Family::Sans, size, true, false)).collect();
+            let keys: Vec<Line> = table.iter().map(|(k, _)| fonts.line(&k.replace("{}", chapter), Family::Sans, size, true, false)).collect();
             let column = keys.iter().map(|l| l.width).fold(0.0, f32::max);
             let mut lines = Vec::new();
-            for (i, (key, (_, what))) in keys.into_iter().zip(KEYS).enumerate() {
+            for (i, (key, (_, what))) in keys.into_iter().zip(table).enumerate() {
                 let y = -row * i as f32;
                 lines.push((fonts.line(what, Family::Sans, size, false, false), column + gap, y, size));
                 let x = column - key.width;
@@ -356,7 +371,7 @@ impl Chrome {
             self.text(&label, 20.0, h - 28.0, [1.0, 0.706, 0.706, 1.0]);
         }
         if face.help {
-            let label = self.keys(face.mac)?;
+            let label = self.keys(face.mac, face.deck)?;
             let (bw, bh) = (label.width() + 48.0, label.bounds[2] - label.bounds[3] + 36.0);
             let (x, y) = ((w - bw) / 2.0, (h - bh) / 2.0);
             self.rect(x, y, bw, bh, [0.13, 0.13, 0.13, 0.95]);

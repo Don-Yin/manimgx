@@ -62,7 +62,7 @@ impl Player {
         })
         .and_then(|s| s)
         .map_err(error)?;
-        Ok(Player { player: player::Player::new(screen, fonts, player::Options { time, playing, mac }) })
+        Ok(Player { player: player::Player::new(screen, fonts, player::Options { time, playing, mac, present: false }) })
     }
 
     /// Take in the next bytes of its director's stream.
@@ -142,11 +142,12 @@ impl Player {
         self.player
             .asks()
             .into_iter()
-            .map(|ask| -> JsValue {
-                match ask {
+            .filter_map(|ask| -> Option<JsValue> {
+                Some(match ask {
                     Ask::Scene(name) => js_sys::Array::of2(&"scene".into(), &name.into()).into(),
                     Ask::Fullscreen(on) => js_sys::Array::of2(&"fullscreen".into(), &on.into()).into(),
-                }
+                    Ask::Slide(_) => return None, // a page's player never presents
+                })
             })
             .collect()
     }

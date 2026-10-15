@@ -18,6 +18,7 @@ from PIL import Image
 from manimgx.animation import clock
 from manimgx.animation.timeline import Animation
 from manimgx.cli.diagnostics import Names, names, written_frame
+from manimgx.cli.preview import play
 from manimgx.cli.scenes import (
     File,
     Format,
@@ -236,13 +237,21 @@ def inspect(
 def present(
     file: File,
     name: SceneName = None,
+    as_page: Annotated[
+        bool,
+        typer.Option(
+            "--page",
+            help="Write the slides as a page instead: the video, and a page beside it that"
+            " plays it, opened in the browser.",
+        ),
+    ] = False,
     output: Annotated[
         Path | None,
         typer.Option(
             "--output",
             "-o",
-            help="The video (.mp4); the page is written beside it (.html). [default:"
-            " <Scene>.mp4 beside the file]",
+            help="With --page: the video (.mp4); the page is written beside it (.html)."
+            " [default: <Scene>.mp4 beside the file]",
         ),
     ] = None,
     resolution: Resolution = None,
@@ -250,20 +259,35 @@ def present(
     pdf: Annotated[
         bool,
         typer.Option(
-            help="Also write a PDF: the picture each slide ends on, a page each."
+            help="With --page: also write a PDF, the picture each slide ends on, a page"
+            " each."
         ),
     ] = False,
     show: Annotated[
-        bool, typer.Option("--open/--no-open", help="Open the page in the browser.")
+        bool,
+        typer.Option(
+            "--open/--no-open", help="With --page: open the page in the browser."
+        ),
     ] = True,
 ) -> None:
     """Present a scene: its sections are the slides.
 
-    Renders the video, writes a page that plays it (it stops at the end of each section,
-    until you go on), and opens it. Keys: → or Space next, ← back, F full screen, B black,
-    Shift+P presenter view (notes, the next slide, a timer), C captions, ? help. A clicker
-    works: it sends the same keys. Begin a section with `self.next_section(...)` in the scene.
+    In a window of its own, as `preview` plays a scene: each slide plays and stops at its
+    end until you go on (a loop plays again until you do, a skip goes on by itself), and the
+    terminal shows each slide's notes, the next slide and the time. It is made again each
+    time its code is saved. Keys: → Space PageDown next, ← PageUp back, Home End the first
+    and the end, a slide's number then Enter, F full screen, B black, C captions, ? help; a
+    clicker sends the same keys, and a click goes on.
+
+    With --page, renders the video, writes a page that plays it, as the window does, and
+    opens it; its Shift+P is the presenter view (notes, the next slide, a timer). Begin a
+    section with `self.next_section(...)` in the scene.
     """
+    if not as_page:
+        if output is not None or pdf or not show:
+            raise fail("error: -o, --pdf and --no-open are the page's: add --page", 2)
+        play(file, name, 0.0, resolution, fps, present=True)
+        return
     kind = scene(file, name)
     video = output or file.with_name(f"{kind.__name__}.mp4")
     if video.suffix.lower() != ".mp4":

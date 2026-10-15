@@ -8,7 +8,7 @@ checks it for problems, and presents it as slides:
 | `manimgx render scene.py` | Makes the video, an MP4 file. |
 | `manimgx preview scene.py` | Plays the scene in a window, and plays it again each time that you save. |
 | `manimgx inspect scene.py` | Writes a storyboard, lists the timeline, and checks 2D layouts. |
-| `manimgx present scene.py` | Makes the video, and shows it as slides in your browser. |
+| `manimgx present scene.py` | Shows it as slides in a window, your notes in the terminal. |
 
 Each command writes its files next to the scene's file. If the file has several scenes,
 give the scene's name after the file: `manimgx render scene.py Intro`. The
@@ -156,12 +156,17 @@ class Talk(m.Scene):
         self.play(m.Transform(wave, total))
 ```
 
-`manimgx present talk.py` makes the video, writes a web page next to it, and opens the
-page in your browser. → or a click goes to the next slide, ← goes back, F shows the full
-screen, and Shift+P opens the presenter view, with your notes, the next slide and a
-timer. To share the talk,
-send the page and the video together. `--pdf` also writes a handout, with a page for each
-slide.
+`manimgx present talk.py` presents the scene in a window, as `manimgx preview` plays it:
+each slide plays and stops at its end until you go on. → or a click goes to the next
+slide, ← goes back, F shows the full screen, B turns the screen black, and a slide's
+number then Enter goes there; a clicker sends the same keys. The terminal you started it
+from shows your notes for each slide, the next slide and the time. Saving the file makes
+the talk again, and the window keeps its place.
+
+To share the talk, `manimgx present talk.py --page` makes the video, writes a web page
+next to it, and opens the page in your browser: it presents as the window does, and its
+Shift+P opens a presenter view. Send the page and the video together. `--pdf` also writes
+a handout, with a page for each slide.
 
 ## Embed in a web page
 

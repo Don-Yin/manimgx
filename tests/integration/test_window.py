@@ -53,3 +53,21 @@ def test_a_film_sent_to_a_closed_window_is_cut(window: Window) -> None:
     window.close()
     film = Held().render(take=window)
     assert film.frame_count < whole
+
+
+def test_a_window_presents_what_it_is_sent_and_closes_with_its_director() -> None:
+    """Presenting, the window holds at the first slide's start until its viewer goes on; it
+    takes the film as any window does, and closes with its director."""
+    linux = sys.platform.startswith("linux")
+    if linux and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        pytest.skip("no display to open a window on")
+    with Window("test_window.py", present=True) as presenting:
+        assert not presenting.wait(timeout=1.0), (
+            f"the window did not open: {presenting.failure}"
+        )
+        film = Held().render(take=presenting)
+        assert film.frame_count
+        assert presenting.open
+        presenting.close()
+        assert not presenting.open
+        assert presenting.failure is None

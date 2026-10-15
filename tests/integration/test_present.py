@@ -126,10 +126,25 @@ def test_present_writes_the_video_the_page_and_a_handout(tmp_path: Path) -> None
     scene.write_text(TALK, encoding="utf-8")
     result = CliRunner().invoke(
         app,
-        ["present", str(scene), "--pdf", "--no-open", "-r", "320x180", "--fps", "10"],
+        [
+            *("present", str(scene), "--page", "--pdf", "--no-open"),
+            *("-r", "320x180", "--fps", "10"),
+        ],
     )
     assert result.exit_code == 0, result.output
     for suffix in (".mp4", ".html", ".pdf"):
         assert (tmp_path / f"Talk{suffix}").stat().st_size > 0
     # a page for each slide's end: the two sections' starts after the first, and the last frame
     assert b"/Count 3" in (tmp_path / "Talk.pdf").read_bytes()
+
+
+@pytest.mark.parametrize("given", [["--pdf"], ["--no-open"], ["-o", "talk.mp4"]])
+def test_the_page_options_ask_for_the_page(tmp_path: Path, given: list[str]) -> None:
+    """In a window, a presentation writes nothing: what the page's options would write needs
+    --page, and asking for it without is a mistake, not a page quietly made."""
+    scene = tmp_path / "talk.py"
+    scene.write_text(TALK, encoding="utf-8")
+    result = CliRunner().invoke(app, ["present", str(scene), *given])
+    assert result.exit_code == 2
+    assert "add --page" in result.output
+    assert not list(tmp_path.glob("Talk.*"))

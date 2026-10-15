@@ -110,10 +110,14 @@ struct Play {
     place: Option<(String, u32)>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct Section {
     name: String,
     start: f64,
+    #[serde(rename = "type", default)]
+    kind: String, // how a presentation plays it: see `Kind`
+    #[serde(default)]
+    notes: String, // what the presenter reads during it
 }
 
 #[derive(Deserialize)]
@@ -155,7 +159,7 @@ impl Notes {
         } else if let Some(section) = said.section {
             // the film begins with one; a section with no frame yet gives way to the next
             if self.sections.is_empty() {
-                self.sections.push(Section { name: "unnamed".into(), start: 0.0 });
+                self.sections.push(Section { name: "unnamed".into(), ..Section::default() });
             }
             if self.sections.last().is_some_and(|s| s.start >= section.start) {
                 self.sections.pop();
@@ -165,6 +169,86 @@ impl Notes {
             self.captions = captions;
         }
     }
+}
+
+/// How a presentation plays a slide, by its section's type (see `Scene.next_section`).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Kind {
+    Normal,       // it stops at its end, until the presenter goes on
+    Skip,         // it goes on into the next by itself
+    Loop,         // it plays again until the presenter goes on
+    CompleteLoop, // so too, but going on ends its round first
+}
+
+impl Kind {
+    fn of(kind: &str) -> Self {
+        match kind {
+            "presentation.skip" => Self::Skip,
+            "presentation.loop" => Self::Loop,
+            "presentation.complete_loop" => Self::CompleteLoop,
+            _ => Self::Normal,
+        }
+    }
+}
+
+/// Where a presentation is: ready at slide `k`'s start (the picture the slide before it left),
+/// or playing it; `leaving`, a complete loop finishing its round to go on.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Deck {
+    k: usize,
+    playing: bool,
+    leaving: bool,
+}
+
+impl Deck {
+    fn ready(k: usize) -> Self {
+        Self { k, playing: false, leaving: false }
+    }
+
+    fn play(k: usize) -> Self {
+        Self { k, playing: true, leaving: false }
+    }
+
+    /// Going on: ready, the slide plays; playing, it is done at once (a loop gives way to the
+    /// next slide, playing; a complete loop ends its round first).
+    fn next(self, kind: Kind) -> Self {
+        if !self.playing {
+            return Self::play(self.k);
+        }
+        match kind {
+            Kind::Loop => Self::play(self.k + 1),
+            Kind::CompleteLoop => Self { leaving: true, ..self },
+            Kind::Normal | Kind::Skip => Self::ready(self.k + 1),
+        }
+    }
+
+    /// Going back: playing, to the slide's start; ready, to the start of the one before.
+    fn back(self) -> Self {
+        Self::ready(if self.playing { self.k } else { self.k.saturating_sub(1) })
+    }
+
+    /// The slide played to its end: a loop plays again (None: from its start) unless it is
+    /// leaving, a skip or a loop leaving goes on into the next, any other stops there, ready.
+    fn ended(self, kind: Kind) -> Option<Self> {
+        match kind {
+            Kind::Loop | Kind::CompleteLoop if !self.leaving => None,
+            Kind::Skip => Some(Self::play(self.k + 1)),
+            _ if self.leaving => Some(Self::play(self.k + 1)),
+            _ => Some(Self::ready(self.k + 1)),
+        }
+    }
+}
+
+/// A slide, as the presenter is told of it: its number (from 1), how many the film has (once it
+/// is all made), its name, its notes, the next one's name, and how long the talk has run.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Slide {
+    pub(crate) number: usize,
+    pub(crate) count: Option<usize>,
+    pub(crate) name: String,
+    pub(crate) notes: String,
+    pub(crate) next: Option<String>,
+    pub(crate) since: Option<Duration>,
 }
 
 /// A screen's surface, and the pass that puts the film and the face on it.
@@ -341,6 +425,38 @@ enum Act {
     Help,
     Scene(isize), // the file's next scene, or the one before
     Back,         // the keys' list closes, or full screen ends
+    // a presentation's (see `Deck`)
+    Next,      // go on
+    Previous,  // go back
+    First,     // the first slide
+    Last,      // the end
+    Digit(u8), // a digit of a slide's number
+    GoTo,      // the slide whose number was typed
+    Black,     // the screen black, or not
+}
+
+/// What key `key` does in a presentation: the keys of `manimgx present`'s page, which a
+/// clicker sends too. `typing`: a slide's number is being typed, which Enter goes to; `open`:
+/// something Escape closes.
+fn decked(key: &str, m: Modifiers, typing: bool, open: bool) -> Option<Act> {
+    if m.ctrl || m.alt || m.meta {
+        return None;
+    }
+    Some(match key {
+        "Enter" if typing => Act::GoTo,
+        "ArrowRight" | "ArrowDown" | " " | "PageDown" | "Enter" | "n" | "N" => Act::Next,
+        "ArrowLeft" | "ArrowUp" | "PageUp" | "Backspace" | "p" | "P" => Act::Previous,
+        "Home" => Act::First,
+        "End" => Act::Last,
+        "f" | "F" => Act::Fullscreen,
+        "b" | "B" | "." => Act::Black,
+        "c" | "C" => Act::Captions,
+        "m" | "M" => Act::Mute,
+        "?" | "h" | "H" => Act::Help,
+        "Escape" if open => Act::Back,
+        digit if digit.len() == 1 && digit.as_bytes()[0].is_ascii_digit() => Act::Digit(digit.as_bytes()[0] - b'0'),
+        _ => return None,
+    })
 }
 
 /// What key `key` does (its value, as the web names it): the film playing or not, something open
@@ -384,6 +500,7 @@ fn keyed(key: &str, m: Modifiers, playing: bool, open: bool, mac: bool) -> Optio
 pub(crate) enum Ask {
     Scene(String),    // its director runs the file's scene of this name
     Fullscreen(bool), // full screen, or not
+    Slide(Slide),     // presenting: the slide shown now, for the presenter
 }
 
 /// When the player is to be drawn again.
@@ -417,6 +534,7 @@ pub(crate) struct Options {
     pub(crate) time: f64,     // seconds
     pub(crate) playing: bool, // or paused
     pub(crate) mac: bool,     // its viewer's keys are a Mac's (the help names Option, not Ctrl)
+    pub(crate) present: bool, // its sections are slides: it stops at each one's end (`Deck`)
 }
 
 pub(crate) struct Player {
@@ -444,6 +562,14 @@ pub(crate) struct Player {
     asks: Vec<Ask>,
     wheeled: f64, // a wheel's turn over the sound's control (points) not yet a twentieth
     pub(crate) ahead: Duration, // a refresh of its screen: when a frame drawn now is seen
+    // presenting: where the presentation is, a slide's number being typed, the screen black,
+    // the slide the presenter was last told of, when the talk began, when the pointer moved
+    deck: Option<Deck>,
+    typed: String,
+    black: bool,
+    told: Option<usize>,
+    began: Option<Instant>,
+    moved: Option<Instant>,
 }
 
 impl Player {
@@ -474,6 +600,12 @@ impl Player {
             asks: Vec::new(),
             wheeled: 0.0,
             ahead: Duration::from_micros(16_667),
+            deck: options.present.then(|| Deck::ready(0)),
+            typed: String::new(),
+            black: false,
+            told: None,
+            began: None,
+            moved: None,
         }
     }
 
@@ -558,6 +690,107 @@ impl Player {
         self.shown_notes().map_or(Vec::new(), |n| n.chapters(self.duration()))
     }
 
+    // ── a presentation ─────────────────────────────────────────────────────────────────────
+
+    /// The slides: the shown take's sections.
+    fn slides(&self) -> &[Section] {
+        self.shown_notes().map_or(&[], |n| n.sections.as_slice())
+    }
+
+    fn kind(&self, k: usize) -> Kind {
+        Kind::of(self.slides().get(k).map_or("", |s| s.kind.as_str()))
+    }
+
+    /// Where slide `k` starts, seconds; for the slide after the last, the film's end, once it has
+    /// ended (None before then: more may come).
+    fn first(&self, k: usize) -> Option<f64> {
+        match self.slides().get(k) {
+            Some(slide) => Some(slide.start),
+            None if self.take().is_some_and(|t| t.2) => Some(self.duration()),
+            None => None,
+        }
+    }
+
+    /// The middle of the frame shown from `t` (of the film's last, from its end): where the
+    /// clock holds to show that frame.
+    fn middle(&self, t: f64) -> f64 {
+        let fps = self.take().map_or(60.0, |t| t.1);
+        (t + 0.5 / fps).min(self.duration() - 0.5 / fps).max(0.0)
+    }
+
+    /// Go to `to`: ready, the clock held at its slide's first frame; playing, from there (unless
+    /// it is there already) on. Past the last slide is the film's end, ready.
+    fn deck_to(&mut self, mut to: Deck) {
+        let n = self.slides().len();
+        if to.k >= n {
+            to = Deck::ready(n);
+        }
+        let start = self.first(to.k).map(|t| self.middle(t));
+        if to.playing {
+            let fps = self.take().map_or(60.0, |t| t.1);
+            if let Some(start) = start
+                && (self.time() - start).abs() > 0.5 / fps
+            {
+                self.seek(start);
+            }
+            self.clock.play();
+            self.began.get_or_insert_with(Instant::now);
+        } else {
+            self.pause();
+            self.seek(start.unwrap_or_else(|| self.made()));
+        }
+        self.deck = Some(to);
+        self.due = true;
+        self.tell();
+    }
+
+    /// The presentation as its clock runs: at the playing slide's end, by its kind, the slide
+    /// plays again, goes on into the next, or stops there, ready for the next. Ready at a slide
+    /// whose first frame was not made yet, it shows it once it is.
+    fn deck_step(&mut self) {
+        let Some(deck) = self.deck else { return };
+        let fps = self.take().map_or(60.0, |t| t.1);
+        if !deck.playing {
+            if let Some(start) = self.first(deck.k).map(|t| self.middle(t))
+                && self.clock.time < start - 0.5 / fps
+                && start <= self.made()
+            {
+                self.seek(start);
+            }
+            return;
+        }
+        let Some(end) = self.first(deck.k + 1) else { return }; // its end is not made yet
+        if self.clock.now() < end - 0.5 / fps {
+            return;
+        }
+        match deck.ended(self.kind(deck.k)) {
+            None => {
+                let start = self.first(deck.k).map_or(0.0, |t| self.middle(t));
+                self.seek(start);
+            }
+            Some(to) => self.deck_to(to),
+        }
+    }
+
+    /// Tell the presenter of the slide shown, once it changes (and once the film has slides).
+    fn tell(&mut self) {
+        let Some(deck) = self.deck else { return };
+        let slides = self.slides();
+        if slides.is_empty() || self.told == Some(deck.k) {
+            return;
+        }
+        let slide = Slide {
+            number: deck.k + 1,
+            count: self.take().is_some_and(|t| t.2).then_some(slides.len()),
+            name: slides.get(deck.k).map_or_else(|| "The end".to_owned(), |s| s.name.clone()),
+            notes: slides.get(deck.k).map_or_else(String::new, |s| s.notes.clone()),
+            next: slides.get(deck.k + 1).map(|s| s.name.clone()),
+            since: self.began.map(|at| at.elapsed()),
+        };
+        self.told = Some(deck.k);
+        self.asks.push(Ask::Slide(slide));
+    }
+
     // ── what it does ───────────────────────────────────────────────────────────────────────
 
     pub(crate) fn seek(&mut self, t: f64) {
@@ -592,7 +825,30 @@ impl Player {
     fn act(&mut self, act: Act) {
         self.active = Some(Instant::now());
         self.due = true;
+        if !matches!(act, Act::Digit(_) | Act::GoTo) {
+            self.typed.clear();
+        }
         match act {
+            Act::Next => {
+                if let Some(deck) = self.deck {
+                    let kind = self.kind(deck.k);
+                    self.deck_to(deck.next(kind));
+                }
+            }
+            Act::Previous => {
+                if let Some(deck) = self.deck {
+                    self.deck_to(deck.back());
+                }
+            }
+            Act::First => self.deck_to(Deck::ready(0)),
+            Act::Last => self.deck_to(Deck::ready(usize::MAX)),
+            Act::Digit(digit) => self.typed.push(char::from(b'0' + digit)),
+            Act::GoTo => {
+                if let Ok(number) = std::mem::take(&mut self.typed).parse::<usize>() {
+                    self.deck_to(Deck::ready(number.saturating_sub(1)));
+                }
+            }
+            Act::Black => self.black = !self.black,
             Act::Toggle => {
                 if self.clock.playing() { self.pause() } else { self.play() }
                 self.say(if self.clock.playing() { "Play" } else { "Pause" });
@@ -667,7 +923,9 @@ impl Player {
     /// `"Escape"`…). Whether the player took it.
     pub(crate) fn key(&mut self, key: &str, m: Modifiers) -> bool {
         self.sound.resume(); // a key pressed: the page may sound now
-        let Some(act) = keyed(key, m, self.clock.playing(), self.help || self.fullscreen, self.mac) else { return false };
+        let open = self.help || self.fullscreen;
+        let act = if self.deck.is_some() { decked(key, m, !self.typed.is_empty(), open) } else { keyed(key, m, self.clock.playing(), open, self.mac) };
+        let Some(act) = act else { return false };
         self.act(act);
         true
     }
@@ -695,6 +953,7 @@ impl Player {
     pub(crate) fn pointer(&mut self, x: f64, y: f64) {
         self.cursor = (x, y);
         self.active = Some(Instant::now());
+        self.moved = self.active;
         self.due = true;
         match self.pointer {
             Pointer::Dragging { .. } => self.seek(self.along(x)),
@@ -750,7 +1009,11 @@ impl Player {
                 touch
             }
             // on the picture: a click plays or pauses (or closes the keys' list); a tap shows the
-            // controls, or hides them
+            // controls, or hides them; presenting, either goes on
+            Pointer::Down { on: None, touch, .. } if self.deck.is_some() => {
+                self.act(if self.help { Act::Back } else { Act::Next });
+                touch
+            }
             Pointer::Down { on: None, touch: false, .. } => {
                 self.act(if self.help { Act::Back } else { Act::Toggle });
                 false
@@ -789,6 +1052,9 @@ impl Player {
     /// sideways it moves the playhead, a second per 100 points; else the player lets it go by
     /// (the page scrolls). Whether it took it.
     pub(crate) fn wheel(&mut self, dx: f64, dy: f64) -> bool {
+        if self.deck.is_some() {
+            return false; // a presentation moves by its slides only
+        }
         if matches!(self.pointer, Pointer::Over(Some(Control::Mute))) && dy.abs() > dx.abs() {
             self.wheeled -= dy;
             let steps = (self.wheeled / 50.0).trunc();
@@ -809,6 +1075,10 @@ impl Player {
 
     /// The cursor to show.
     pub(crate) fn cursor(&self) -> Cursor {
+        if self.deck.is_some() {
+            // presenting: hidden, unless the pointer moved lately
+            return if self.moved.is_some_and(|at| at.elapsed() < IDLE) { Cursor::Arrow } else { Cursor::Hidden };
+        }
         match self.pointer {
             Pointer::Over(Some(_)) | Pointer::Dragging { .. } | Pointer::Down { on: Some(_), .. } => Cursor::Hand,
             Pointer::Over(None) if self.clock.playing() && !self.shows_controls() => Cursor::Hidden,
@@ -848,6 +1118,9 @@ impl Player {
     /// Whether the controls show: over a picture, while paused or waiting, after the viewer
     /// did something, the pointer on them, or the keys shown.
     fn shows_controls(&self) -> bool {
+        if self.deck.is_some() {
+            return false; // presenting: the slides alone
+        }
         let lately = self.active.is_some_and(|at| at.elapsed() < IDLE);
         let on = matches!(self.pointer, Pointer::Over(Some(_)) | Pointer::Dragging { .. } | Pointer::Down { on: Some(_), .. });
         self.takes.shown.is_some() && (!self.clock.playing() || self.waits() || lately || on || self.help)
@@ -880,11 +1153,12 @@ impl Player {
             sound: notes.and_then(|n| n.sound.as_ref()).map(|_| self.sound.muted),
             scenes: self.scenes.len() > 1,
             fullscreen: self.fullscreen,
-            flash: self.flash.as_ref().filter(|(_, at)| at.elapsed() < FLASH).map(|(what, _)| what.clone()),
+            flash: self.flash.as_ref().filter(|(_, at)| at.elapsed() < FLASH && self.deck.is_none()).map(|(what, _)| what.clone()),
             status,
             error: self.error.clone(),
             help: self.help,
             mac: self.mac,
+            deck: self.deck.is_some(),
         }
     }
 
@@ -893,7 +1167,9 @@ impl Player {
     fn next_change(&self) -> Option<Instant> {
         let flash = self.flash.as_ref().map(|(_, at)| *at + FLASH).filter(|&end| end > Instant::now());
         let idle = self.active.filter(|_| self.shows_controls()).map(|at| at + IDLE).filter(|&end| end > Instant::now());
-        flash.into_iter().chain(idle).min()
+        // presenting, the cursor hides once the pointer rests
+        let rest = self.moved.filter(|_| self.deck.is_some()).map(|at| at + IDLE).filter(|&end| end > Instant::now());
+        flash.into_iter().chain(idle).chain(rest).min()
     }
 
     /// When it is to be drawn next. It reads a drawn frame's see-through count meanwhile, and
@@ -923,6 +1199,8 @@ impl Player {
     /// just before the picture goes to the screen. Hidden, only the clock and the sound.
     pub(crate) fn draw(&mut self, presenting: impl FnOnce()) -> Result<(), String> {
         self.due = false;
+        self.deck_step();
+        self.tell();
         let (made, ended, playing) = (self.made(), self.take().is_some_and(|t| t.2), self.clock.playing());
         self.clock.bound(made, ended);
         let time = self.time();
@@ -973,8 +1251,9 @@ impl Player {
             let (x, y) = ((size.0 - w) / 2, (size.1 - h) / 2);
             [x as f32, y as f32, (x + w) as f32, (y + h) as f32]
         });
-        let film = self.takes.shown.as_ref().and_then(|t| t.player.targets.as_ref()).map(|t| &t.frame.color);
-        let face = over.then(|| self.chrome.player.targets.as_ref().map(|t| &t.frame.color)).flatten();
+        // black, presenting: nothing but the keys' list, if it is open
+        let film = self.takes.shown.as_ref().and_then(|t| t.player.targets.as_ref()).map(|t| &t.frame.color).filter(|_| !self.black);
+        let face = over.then(|| self.chrome.player.targets.as_ref().map(|t| &t.frame.color)).flatten().filter(|_| !self.black || self.help);
         let screen = &mut self.screen;
         match with_gpu(|gpu| screen.present(gpu, film, face, place, presenting))? {
             Presented::Shown => {}
@@ -1031,8 +1310,71 @@ mod tests {
         assert_eq!(titles(&notes), ["scene.py:12", "helpers.py:3", "Play 3"]);
         // sections, if more than one: a section with no frame yet gives way to the next
         for (name, start) in [("Intro", 0.0), ("Middle", 1.0), ("Gone", 2.0), ("End", 2.0)] {
-            notes.take(Said { section: Some(Section { name: name.into(), start }), ..Said::default() });
+            notes.take(Said { section: Some(Section { name: name.into(), start, ..Section::default() }), ..Said::default() });
         }
         assert_eq!(notes.chapters(3.0), [(0.0, 1.0, "Intro".into()), (1.0, 2.0, "Middle".into()), (2.0, 3.0, "End".into())]);
+    }
+
+    #[test]
+    fn a_section_says_how_it_is_presented() {
+        let said: Said = serde_json::from_str(r#"{"section": {"name": "Routes", "start": 2.5, "frame": 150, "type": "presentation.loop", "notes": "Let it play."}}"#).unwrap();
+        let section = said.section.unwrap();
+        assert_eq!((section.name.as_str(), section.start, Kind::of(&section.kind), section.notes.as_str()), ("Routes", 2.5, Kind::Loop, "Let it play."));
+        // a director that says neither: a slide that stops at its end, with no notes
+        let said: Said = serde_json::from_str(r#"{"section": {"name": "A", "start": 0}}"#).unwrap();
+        assert_eq!(Kind::of(&said.section.unwrap().kind), Kind::Normal);
+        assert_eq!(Kind::of("presentation.skip"), Kind::Skip);
+        assert_eq!(Kind::of("presentation.complete_loop"), Kind::CompleteLoop);
+        assert_eq!(Kind::of("default.normal"), Kind::Normal);
+    }
+
+    #[test]
+    fn a_presentation_has_the_pages_keys() {
+        let none = Modifiers::default();
+        let key = |k| decked(k, none, false, false);
+        for next in ["ArrowRight", "ArrowDown", " ", "PageDown", "Enter", "n"] {
+            assert_eq!(key(next), Some(Act::Next), "{next}");
+        }
+        for back in ["ArrowLeft", "ArrowUp", "PageUp", "Backspace", "p"] {
+            assert_eq!(key(back), Some(Act::Previous), "{back}");
+        }
+        assert_eq!(key("Home"), Some(Act::First));
+        assert_eq!(key("End"), Some(Act::Last));
+        assert_eq!(key("b"), Some(Act::Black));
+        assert_eq!(key("."), Some(Act::Black));
+        assert_eq!(key("f"), Some(Act::Fullscreen));
+        assert_eq!(key("?"), Some(Act::Help));
+        // a slide's number, typed, then Enter goes there
+        assert_eq!(key("4"), Some(Act::Digit(4)));
+        assert_eq!(decked("Enter", none, true, false), Some(Act::GoTo));
+        // Escape closes what is open; the system's keys are the system's
+        assert_eq!(key("Escape"), None);
+        assert_eq!(decked("Escape", none, false, true), Some(Act::Back));
+        assert_eq!(decked("ArrowRight", Modifiers { meta: true, ..none }, false, false), None);
+        assert_eq!(key("x"), None);
+    }
+
+    #[test]
+    fn a_presentation_goes_as_the_page_does() {
+        let (ready, play) = (Deck::ready, Deck::play);
+        // ready, going on plays the slide; playing, it is done at once and the next is ready
+        assert_eq!(ready(2).next(Kind::Normal), play(2));
+        assert_eq!(play(2).next(Kind::Normal), ready(3));
+        assert_eq!(play(2).next(Kind::Skip), ready(3));
+        // a loop gives way to the next slide, playing; a complete loop ends its round first
+        assert_eq!(play(2).next(Kind::Loop), play(3));
+        let leaving = play(2).next(Kind::CompleteLoop);
+        assert_eq!(leaving, Deck { k: 2, playing: true, leaving: true });
+        // back: playing, to the slide's start; ready, to the one before's (never before the first)
+        assert_eq!(play(2).back(), ready(2));
+        assert_eq!(ready(2).back(), ready(1));
+        assert_eq!(ready(0).back(), ready(0));
+        // at a slide's end: a normal slide stops, ready for the next; a skip goes on; a loop
+        // plays again, unless it is leaving
+        assert_eq!(play(2).ended(Kind::Normal), Some(ready(3)));
+        assert_eq!(play(2).ended(Kind::Skip), Some(play(3)));
+        assert_eq!(play(2).ended(Kind::Loop), None);
+        assert_eq!(play(2).ended(Kind::CompleteLoop), None);
+        assert_eq!(leaving.ended(Kind::CompleteLoop), Some(play(3)));
     }
 }
