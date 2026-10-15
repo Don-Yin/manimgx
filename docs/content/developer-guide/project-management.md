@@ -323,7 +323,7 @@ the workflows, in [`.github/deploy/`](https://github.com/academa-labs/manimgx/tr
 ### [`AGENTS.md`](https://github.com/academa-labs/manimgx/blob/main/AGENTS.md) and the contributing guide
 
 `AGENTS.md` is this guide's commands, rules and layout in brief, for coding agents; the
-assistant of the [AI workflow](github-workflows.md#7-aiyaml-claude-on-issues-and-pull-requests)
+assistant of the [Claude workflow](github-workflows.md#7-claudeyaml-claude-on-issues-and-pull-requests)
 is told to follow it. The
 [contributing guide](https://github.com/academa-labs/manimgx/blob/main/.github/CONTRIBUTING.md)
 says how a change is proposed (an issue first, then a pull request) and links here for how

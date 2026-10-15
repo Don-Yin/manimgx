@@ -10,8 +10,8 @@ Some tasks must run the same way every time:
 - **For every release:** test; build the wheels, the source distribution, the font
   packages and the executables; publish them to GitHub and PyPI, the package for the
   browser to npm, and the Docker image to ghcr.io.
-- **For every issue and pull request:** a first reply to a newcomer's issue, a first
-  review, and an assistant that a maintainer can ask.
+- **For every pull request and issue:** a review once a pull request is ready, and an
+  assistant that a maintainer can ask.
 - **When a maintainer requests an update:** review and update pinned actions and dependencies.
 
 Done by hand, steps get forgotten, and every run costs someone's time.
@@ -245,37 +245,31 @@ Windows' interpreter also carries Microsoft's proprietary `vcruntime140.dll` and
 redistributables governed by [Microsoft's distribution terms](https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files),
 not open-source components supplied by the source archive.
 
-### 7. [`ai.yaml`](https://github.com/academa-labs/manimgx/blob/main/.github/workflows/ai.yaml): Claude on issues and pull requests
+### 7. [`claude.yaml`](https://github.com/academa-labs/manimgx/blob/main/.github/workflows/claude.yaml): Claude on issues and pull requests
 
 Claude runs through [claude-code-action](https://github.com/anthropics/claude-code-action),
-on Amazon Bedrock. GitHub's OIDC token is exchanged for a short-lived AWS session (for the
-role in the variable `AWS_ROLE`), so no key is stored. The jobs that use it run in the `ai`
-environment, and each run has a budget in dollars.
+and writes as `claude[bot]`: the [Claude GitHub App](https://github.com/apps/claude),
+installed on the repository, which can push branches, open pull requests and comment. It
+runs on a Claude subscription, whose token is the `ai` environment's secret
+`CLAUDE_CODE_OAUTH_TOKEN`. `claude setup-token` makes one, good for a year; a maintainer
+makes the next before it expires.
 
-**When it runs:** an issue is opened, a comment is made on an issue or a pull request, or a
-pull request is opened or marked ready for review.
+**When it runs:** a pull request is opened or marked ready for review, an issue is opened,
+or a comment is made on an issue or a pull request.
 
-**What it does**, in three ways:
+**What it does**, in two ways:
 
-- **A first reply** to an issue opened by someone outside the team (not an owner, a member
-  or a collaborator, and not a bot). A model, Claude Sonnet, reads the issue, the titles of
-  the open issues and the repository, and can do nothing else: it may only read the
-  checked-out files, and it answers with a reply of at most 2,000 characters and up to
-  three related issues. Its instructions are the workflow's own (`prompt`).
-  A second job, with no model and no checkout, posts the reply: it refuses one that looks
-  like it carries a credential, defuses its @-mentions, drops its images, links the related
-  issues, and says that the reply is automated and that a maintainer will follow up.
 - **A review** of a pull request from a branch of the repository (not a draft, and not a
   bot's), when it is opened or marked ready: Anthropic's code-review plugin, with Claude
   Opus, comments on the problems it is sure of.
 - **@claude:** a maintainer mentions @claude in a new issue, or in a comment on an issue or
   a pull request, and asks for anything: an answer, a review, a change. The job first
   checks that the author can write to the repository, and stops otherwise. Claude Opus
-  works in the environment `just sync` makes, and its commands run in Claude Code's
-  sandbox: they reach only GitHub, PyPI, crates.io and npm, and never see the AWS session. It
-  is told to follow [`AGENTS.md`](https://github.com/academa-labs/manimgx/blob/main/AGENTS.md),
-  to run `just check` and the tests its change touches before it pushes, and to open a
-  change as a draft pull request. On a pull request from a fork, it only reads.
+  works in the environment `just sync` makes, in Claude Code's auto mode: it runs any
+  command a classifier allows, with no list of commands to keep. It is told to follow
+  [`AGENTS.md`](https://github.com/academa-labs/manimgx/blob/main/AGENTS.md), to run
+  `just check` and the tests its change touches before it pushes, and to open a change as
+  a draft pull request. On a pull request from a fork, it only reads.
 
 ## Deployment credentials
 
@@ -294,10 +288,9 @@ base commit's deployment files and the static artifacts:
   environments also allow pull request merge refs.
 - Pull requests from forks and from Dependabot get no secrets: they are built and tested,
   not previewed, and their coverage is not published.
-- The first reply's model can only read, and the job that posts its reply runs no model.
 - The @claude assistant is the exception: it runs the repository's code (`just sync`, the
-  checks, the tests) with the AWS session at hand, and its sandbox hides the session from
-  every command it runs.
+  checks, the tests) with Claude's token at hand. Only a maintainer can start it, and on a
+  fork's pull request it runs none of the pull request's code.
 
 Every workflow's default permissions are none (`permissions: {}`); each job asks for what
 it needs.
@@ -311,9 +304,9 @@ it needs.
   version is pinned in `WRANGLER_VERSION`. Maintainers review updates to these pins, and
   [zizmor](https://docs.zizmor.sh), one of the checks of `just check`, finds security
   problems in the workflows.
-- The Test, docs and AI workflows reuse compiled Rust dependencies. The browser engine
+- The Test, docs and Claude workflows reuse compiled Rust dependencies. The browser engine
   has a separate cache key. Pull request builds do not write the shared caches; docs saves
-  only from `main`, Test also saves from explicit non-PR runs, and AI only restores them.
+  only from `main`, Test also saves from explicit non-PR runs, and Claude only restores them.
 
 ## Dependency updates
 
