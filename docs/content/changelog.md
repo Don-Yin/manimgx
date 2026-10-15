@@ -34,6 +34,7 @@ The notable changes to ManimGX, release by release. The format follows
 ### Fixed
 
 - Keep resources needed by queued video frames until their transparency retries finish, fixing render failures during cache cleanup ([#16](https://github.com/academa-labs/manimgx/issues/16)).
+- Draw a storyboard picture without dropping the frame the film holds back, fixing `manimgx render` failures ("unknown shape") under memory pressure.
 - Preserve the benchmark comparison images' aspect ratios when PyPI narrows the README table.
 - Credit Filament, whose code the 3D lighting is adapted from, in the README and the wheels' third-party notices.
 
