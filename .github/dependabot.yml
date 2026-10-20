@@ -71,3 +71,7 @@ updates:
     groups:
       review-panel:
         patterns: ["*"]
+    # svelte-check checks with TypeScript 7 only beside TypeScript 6, so `typescript` stays on 6
+    ignore:
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
