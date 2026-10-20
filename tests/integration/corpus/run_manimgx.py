@@ -91,8 +91,7 @@ def mp4_frames(path: Path) -> int:
         raise ValueError(msg)
     if previous < 0 or end <= previous:
         raise ValueError(f"{path}: missing final picture duration")
-    assert time_base is not None
-    shown = time_base * end * FPS
+    shown = Fraction(end * FPS * time_base.numerator, time_base.denominator)
     if shown.denominator != 1:
         msg = f"{path} lasts {shown} frames"
         raise ValueError(msg)
