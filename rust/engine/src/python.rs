@@ -1,6 +1,6 @@
-//! The engine as Python's extension module, `manimgx._engine`: the player (natively: read back
-//! or encoded to MP4), the recorder of a take (everywhere), the typesetter and the content keys,
-//! over the core in `render`, `take` and `typeset`.
+//! The engine as Python's extension module, `manimgx._engine`: the player (natively, on a thread
+//! of its own: read back or encoded to MP4, see `stage`), the recorder of a take (everywhere), the
+//! typesetter and the content keys, over the core in `render`, `take` and `typeset`.
 
 #[cfg(feature = "render")]
 use pyo3::exceptions::PyRuntimeError;
@@ -9,7 +9,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
 #[cfg(feature = "render")]
-use crate::render::{COUNT_BYTES, Player, count, with_gpu};
+use crate::render::with_gpu;
 use crate::{CameraView, take};
 
 // One source for the native binding and every Python export entry point.
@@ -19,181 +19,158 @@ const DEFAULT_ENCODER_CRF: f32 = 23.0;
 #[cfg(feature = "typeset")]
 pyo3::create_exception!(_engine, TypstError, pyo3::exceptions::PyException);
 
-#[cfg(feature = "render")]
+/// The GPU's player, natively: shapes, brushes and images uploaded once under a key, then frames
+/// drawn — into a video, or read back. Each call is checked here and carried out on the player's
+/// own thread, in order (see `stage`): so a call waits only for room in the queue, and for what it
+/// asks for (pixels, the video's end).
+#[cfg(feature = "export")]
+#[pyclass(module = "manimgx._engine")]
+struct Player {
+    stage: crate::stage::Stage,
+    width: u32,
+    height: u32,
+}
+
+#[cfg(feature = "export")]
 impl Player {
-    /// The common readback for directly evaluated frames and recorded takes.
-    fn readback<'py>(&mut self, py: Python<'py>, frames: Vec<crate::render::Frame>) -> PyResult<Bound<'py, PyBytes>> {
-        py.detach(|| {
-            with_gpu(|gpu| -> Result<(), String> {
-                // drawn again while its see-through fragments overflow the lists
-                loop {
-                    let (mut encoder, _, composited) = self.encode(gpu, &frames)?;
-                    let t = self.targets.as_ref().expect("targets");
-                    let pixels = t.padded as u64 * self.height as u64;
-                    self.copy_pixels(&mut encoder);
-                    let lists = self.lists.as_ref().filter(|_| composited);
-                    if let Some(lists) = lists {
-                        encoder.copy_buffer_to_buffer(&lists.appended, 0, &t.readback, pixels, Some(COUNT_BYTES));
-                    }
-                    let capacity = lists.map(|l| l.capacity);
-                    gpu.queue.submit(Some(encoder.finish()));
-                    self.map_pixels(gpu)?;
-                    let Some(capacity) = capacity else { return Ok(()) };
-                    let appended = count(&t.readback.slice(pixels..).get_mapped_range().map_err(|e| e.to_string())?);
-                    if !self.overflowed(gpu, appended, capacity) {
-                        return Ok(());
-                    }
-                    self.targets.as_ref().expect("targets").readback.unmap();
-                }
-            })?
-        })
-        .map_err(PyRuntimeError::new_err)?;
-        self.pixels(py)
+    /// Queue an upload made from what Python sent (a mistake in it is Python's: a ValueError).
+    fn upload(&self, py: Python<'_>, made: Result<crate::render::Upload, String>) -> PyResult<()> {
+        let upload = made.map_err(PyValueError::new_err)?;
+        self.call(py, crate::stage::Call::Upload(upload))
     }
 
-    fn pixels<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let (width, height) = (self.width, self.height);
-        // copied once: from the mapped buffer into the bytes Python gets
-        let t = self.targets.as_ref().expect("targets");
-        let mapped = t.readback.slice(..t.padded as u64 * height as u64).get_mapped_range().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-        let row = (width * 4) as usize;
-        let pixels = if t.padded as usize == row {
-            PyBytes::new(py, &mapped)
-        } else {
-            PyBytes::new_with(py, row * height as usize, |out| {
-                for (to, from) in out.chunks_exact_mut(row).zip(mapped.chunks_exact(t.padded as usize)) {
-                    to.copy_from_slice(&from[..row]);
-                }
-                Ok(())
-            })?
-        };
-        drop(mapped);
-        t.readback.unmap();
-        Ok(pixels)
+    fn call(&self, py: Python<'_>, call: crate::stage::Call) -> PyResult<()> {
+        py.detach(|| self.stage.call(call)).map_err(PyRuntimeError::new_err)
     }
 }
 
-#[cfg(feature = "render")]
+#[cfg(feature = "export")]
 #[pymethods]
 impl Player {
     #[new]
     #[pyo3(signature = (width, height, samples = 4))]
-    fn py_new(width: u32, height: u32, samples: u32) -> Self {
-        Self::new(width, height, samples)
+    fn new(width: u32, height: u32, samples: u32) -> Self {
+        Self { stage: crate::stage::Stage::new(width, height, samples), width, height }
     }
 
-    #[pyo3(name = "add_path")]
-    fn py_add_path(&mut self, key: u64, points: &[u8], subpaths: &[u8], centroid_area: [f32; 6]) -> PyResult<()> {
-        self.add_path(key, points, subpaths, centroid_area).map_err(PyValueError::new_err)
+    fn add_path(&self, py: Python<'_>, key: u64, points: &[u8], subpaths: &[u8], centroid_area: [f32; 6]) -> PyResult<()> {
+        self.upload(py, crate::render::Upload::path(key, points, subpaths, centroid_area))
     }
 
-    #[pyo3(name = "add_points")]
-    fn py_add_points(&mut self, key: u64, vertices: &[u8]) -> PyResult<()> {
-        self.add_points(key, vertices).map_err(PyValueError::new_err)
+    fn add_points(&self, py: Python<'_>, key: u64, vertices: &[u8]) -> PyResult<()> {
+        self.upload(py, crate::render::Upload::points(key, vertices))
     }
 
-    #[pyo3(name = "add_mesh", signature = (key, points, uvs, normals, triangles, outline = 0, block = 0))]
+    #[pyo3(signature = (key, points, uvs, normals, triangles, outline = 0, block = 0))]
     #[allow(clippy::too_many_arguments)]
-    fn py_add_mesh(&mut self, key: u64, points: &[u8], uvs: &[u8], normals: &[u8], triangles: &[u8], outline: u32, block: u32) -> PyResult<()> {
-        self.add_mesh(key, points, uvs, normals, triangles, outline, block).map_err(PyValueError::new_err)
+    fn add_mesh(&self, py: Python<'_>, key: u64, points: &[u8], uvs: &[u8], normals: &[u8], triangles: &[u8], outline: u32, block: u32) -> PyResult<()> {
+        self.upload(py, crate::render::Upload::mesh(key, points, uvs, normals, triangles, outline, block))
     }
 
-    #[pyo3(name = "grow_path", signature = (key, points, closed = false))]
-    fn py_grow_path(&mut self, key: u64, points: &[u8], closed: bool) -> PyResult<()> {
-        self.grow_path(key, points, closed).map_err(PyValueError::new_err)
+    #[pyo3(signature = (key, points, closed = false))]
+    fn grow_path(&self, py: Python<'_>, key: u64, points: &[u8], closed: bool) -> PyResult<()> {
+        self.upload(py, crate::render::Upload::grow(key, points, closed))
     }
 
-    #[pyo3(name = "evict")]
-    fn py_evict(&mut self, keys: Vec<u64>) -> Vec<u64> {
-        self.evict(keys)
+    fn add_rows(&self, py: Python<'_>, key: u64, rows: &[u8]) -> PyResult<()> {
+        self.upload(py, crate::render::Upload::rows(key, rows))
     }
 
-    #[pyo3(name = "stored")]
-    fn py_stored(&self) -> (usize, usize) {
-        self.stored()
+    fn add_texture(&self, py: Python<'_>, key: u64, width: u32, height: u32, rgba: &[u8]) -> PyResult<()> {
+        self.upload(py, crate::render::Upload::texture(key, width, height, rgba))
     }
 
-    #[pyo3(name = "pressured")]
-    fn py_pressured(&self, py: Python<'_>) -> PyResult<bool> {
-        py.detach(|| with_gpu(|gpu| self.pressured(gpu))).map_err(PyRuntimeError::new_err)
+    fn add_environment(&self, py: Python<'_>, id: u32, width: u32, height: u32, rgbe: &[u8]) -> PyResult<()> {
+        self.upload(py, crate::render::Upload::environment(id, width, height, rgbe))
     }
 
-    #[pyo3(name = "add_rows")]
-    fn py_add_rows(&mut self, key: u64, rows: &[u8]) -> PyResult<()> {
-        self.add_rows(key, rows).map_err(PyValueError::new_err)
+    /// Forget shapes, brushes and textures, once the video's frames in flight that may draw them
+    /// again are settled.
+    fn evict(&self, py: Python<'_>, keys: Vec<u64>) -> PyResult<()> {
+        self.call(py, crate::stage::Call::Evict(keys))
     }
 
-    #[pyo3(name = "add_texture")]
-    fn py_add_texture(&mut self, key: u64, width: u32, height: u32, rgba: &[u8]) -> PyResult<()> {
-        self.add_texture(key, width, height, rgba).map_err(PyValueError::new_err)
+    /// The bytes it holds alive (shapes, brushes, textures), as of the calls carried out.
+    fn held(&self) -> usize {
+        self.stage.held()
     }
 
-    #[pyo3(name = "add_environment")]
-    fn py_add_environment(&mut self, id: u32, width: u32, height: u32, rgbe: &[u8]) -> PyResult<()> {
-        self.add_environment(id, width, height, rgbe).map_err(PyValueError::new_err)
+    /// Whether what it holds outgrows a GPU buffer's binding (each frame then binds only what it
+    /// draws), as of the calls carried out.
+    fn pressured(&self) -> bool {
+        self.stage.pressured()
     }
 
-    /// Render one frame and read it back: RGBA8 rows, top to bottom. `cameras` are views drawn
-    /// first, each into a texture that textured meshes of later views sample by its key:
-    /// (key, width, height, view, records).
+    /// Render one frame, as the calls before it left the player, and read it back: RGBA8 rows,
+    /// top to bottom. `cameras` are views drawn first, each into a texture that textured meshes
+    /// of later views sample by its key: (key, width, height, view, records).
     #[pyo3(signature = (view, records, cameras = Vec::new()))]
-    fn render<'py>(&mut self, py: Python<'py>, view: &[u8], records: &[u8], cameras: Vec<CameraView>) -> PyResult<Bound<'py, PyBytes>> {
-        let frames = self.views(view, records, cameras).map_err(PyValueError::new_err)?;
-        self.readback(py, frames)
+    fn render<'py>(&self, py: Python<'py>, view: &[u8], records: &[u8], cameras: Vec<CameraView>) -> PyResult<Bound<'py, PyBytes>> {
+        PyBytes::new_with(py, (4 * self.width * self.height) as usize, |into| {
+            py.detach(|| {
+                self.stage.now(|player| {
+                    let frames = player.views(view, records, cameras)?;
+                    with_gpu(|gpu| player.pixels(gpu, &frames, into))?
+                })
+            })
+            .map_err(PyRuntimeError::new_err)
+        })
     }
 
-    #[cfg(feature = "export")]
     /// Start an MP4 at `path`; frames follow with `push`, and `end_export` writes the file. x264
     /// runs at `preset` and `crf` (the module's defaults), with `options` — its own settings
     /// over those (as `-x264-params`, e.g. `[("keyint", "600")]`).
     #[pyo3(signature = (path, fps = 60, preset = DEFAULT_ENCODER_PRESET.to_string(), crf = DEFAULT_ENCODER_CRF, options = Vec::new()))]
-    fn begin_export(&mut self, py: Python<'_>, path: String, fps: u32, preset: String, crf: f32, options: Vec<(String, String)>) -> PyResult<()> {
-        if self.export.is_some() {
-            return Err(PyRuntimeError::new_err("an export is already open"));
-        }
-        let (width, height) = (self.width, self.height);
-        let export = py.detach(|| with_gpu(|gpu| crate::export::Export::new(gpu, width, height, fps, &preset, crf, &options, &path))?).map_err(PyRuntimeError::new_err)?;
-        self.export = Some(export);
-        Ok(())
+    fn begin_export(&self, py: Python<'_>, path: String, fps: u32, preset: String, crf: f32, options: Vec<(String, String)>) -> PyResult<()> {
+        let encoder = crate::encode::Encoder::new(self.width, self.height, fps, &preset, crf, &options, &path).map_err(PyRuntimeError::new_err)?;
+        self.call(py, crate::stage::Call::Video(encoder))
     }
 
-    #[cfg(feature = "export")]
     /// The next frame of the video, shown for `repeat` frames: a view and its records, with
-    /// `cameras` drawn first (as for `render`); `key`: a keyframe, where a player can start.
+    /// `cameras` drawn first (as for `render`); `key`: a keyframe, where a player can start. With
+    /// `capture`, wait for its pixels and return them: the same draw's.
     #[pyo3(signature = (view, records, repeat = 1, cameras = Vec::new(), key = false, capture = false))]
     #[allow(clippy::too_many_arguments)]
-    fn push<'py>(&mut self, py: Python<'py>, view: &[u8], records: &[u8], repeat: u32, cameras: Vec<CameraView>, key: bool, capture: bool) -> PyResult<Option<Bound<'py, PyBytes>>> {
-        let frames = self.views(view, records, cameras).map_err(PyValueError::new_err)?;
-        py.detach(|| with_gpu(|gpu| self.push_frames(gpu, frames, repeat, key, capture))?).map_err(PyRuntimeError::new_err)?;
-        capture.then(|| self.pixels(py)).transpose()
+    fn push<'py>(&self, py: Python<'py>, view: &[u8], records: &[u8], repeat: u32, cameras: Vec<CameraView>, key: bool, capture: bool) -> PyResult<Option<Bound<'py, PyBytes>>> {
+        if !capture {
+            let (view, records) = (view.to_vec(), records.to_vec());
+            self.call(py, crate::stage::Call::Frame { view, records, cameras, repeat, key })?;
+            return Ok(None);
+        }
+        let pixels = PyBytes::new_with(py, (4 * self.width * self.height) as usize, |into| {
+            py.detach(|| {
+                self.stage
+                    .now(|player| {
+                        let frames = player.views(view, records, cameras)?;
+                        with_gpu(|gpu| player.push_frames(gpu, frames, repeat, key, Some(into)))?
+                    })
+                    .inspect_err(|error| self.stage.fail(error))
+            })
+            .map_err(PyRuntimeError::new_err)
+        })?;
+        Ok(Some(pixels))
     }
 
-    #[cfg(feature = "export")]
-    /// Abandon the video: nothing is written.
-    fn abort_export(&mut self) {
-        self.export = None;
+    /// Abandon the video: nothing is written (once this returns, nor is any part of it).
+    fn abort_export(&self, py: Python<'_>) {
+        // a player stopped by a mistake has abandoned it already
+        let _ = py.detach(|| {
+            self.stage.now(|player| {
+                player.export = None;
+                Ok(())
+            })
+        });
     }
 
-    #[cfg(feature = "export")]
     /// Finish the video, with `sound` beside it if given — its soundtrack: float32 samples,
     /// interleaved, `channels` of them, at `rate` samples a second, encoded as AAC-LC at about
     /// `bitrate` bits a second. Returns (seconds since it began, of which in x264, fraction of
     /// macroblocks converted, bytes written).
     #[pyo3(signature = (sound = None, channels = 1, rate = 48000, bitrate = 192000))]
-    fn end_export(&mut self, py: Python<'_>, sound: Option<&[u8]>, channels: usize, rate: u32, bitrate: u32) -> PyResult<(f64, f64, f64, u64)> {
-        let mut export = self.export.take().ok_or_else(|| PyRuntimeError::new_err("no export is open"))?;
-        let pcm: Option<Vec<f32>> = sound.map(|s| crate::read(s, "sound")).transpose().map_err(PyValueError::new_err)?;
-        py.detach(|| {
-            // the sound is encoded while the encoder's thread finishes the pictures
-            let audio = pcm.map(|p| crate::aac::encode(&p, channels, rate, bitrate)).transpose()?;
-            with_gpu(|gpu| {
-                while !export.pending.is_empty() {
-                    self.retire(gpu, &mut export)?;
-                }
-                export.finish(audio)
-            })?
-        })
-        .map_err(PyRuntimeError::new_err)
+    fn end_export(&self, py: Python<'_>, sound: Option<&[u8]>, channels: usize, rate: u32, bitrate: u32) -> PyResult<crate::stage::Made> {
+        let samples: Option<Vec<f32>> = sound.map(|s| crate::read(s, "sound")).transpose().map_err(PyValueError::new_err)?;
+        let sound = samples.map(|samples| crate::stage::Sound { samples, channels, rate, bitrate });
+        py.detach(|| self.stage.now(|player| crate::stage::end(player, sound))).map_err(PyRuntimeError::new_err)
     }
 }
 
@@ -230,7 +207,11 @@ impl Replay {
             return Err(pyo3::exceptions::PyIndexError::new_err(format!("frame {frame} is outside the take's {} frames", self.take.frames)));
         }
         let frames = self.take.frame_views(frame as u32).map_err(PyValueError::new_err)?;
-        self.take.player.readback(py, frames)
+        let take = &mut self.take;
+        let (width, height) = take.size;
+        PyBytes::new_with(py, (4 * width * height) as usize, |into| {
+            py.detach(|| with_gpu(|gpu| take.player.pixels(gpu, &frames, into))?).map_err(PyRuntimeError::new_err)
+        })
     }
 }
 
@@ -324,14 +305,14 @@ impl Recorder {
         self.writer.grow(key, points, closed);
     }
 
-    /// The feeder may forget every key: a take keeps the uploads its frames need itself.
-    fn evict(&mut self, keys: Vec<u64>) -> Vec<u64> {
-        keys
+    /// Nothing: a take keeps the uploads its frames need itself (its player holds what it draws).
+    fn evict(&mut self, keys: Vec<u64>) {
+        let _ = keys;
     }
 
-    /// (0, 0): a take holds nothing on a GPU (its player keeps what it is sent).
-    fn stored(&self) -> (usize, usize) {
-        (0, 0)
+    /// 0: a take holds nothing on a GPU.
+    fn held(&self) -> usize {
+        0
     }
 
     /// The next frame, shown for `repeat` frames: a view and its records, `cameras` drawn first
@@ -533,9 +514,10 @@ fn _engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("DEFAULT_ENCODER_PRESET", DEFAULT_ENCODER_PRESET)?;
     m.add("DEFAULT_ENCODER_CRF", DEFAULT_ENCODER_CRF)?;
     m.add("TAKE_VERSION", take::VERSION)?;
+    #[cfg(feature = "export")]
+    m.add_class::<Player>()?;
     #[cfg(feature = "render")]
     {
-        m.add_class::<Player>()?;
         m.add_function(wrap_pyfunction!(start_gpu, m)?)?;
         m.py().import("atexit")?.call_method1("register", (wrap_pyfunction!(settle, m)?,))?;
     }

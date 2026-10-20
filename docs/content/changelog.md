@@ -25,6 +25,9 @@ The notable changes to ManimGX, release by release. The format follows
 
 ### Changed
 
+- Render faster: a graph's area reads its points' coordinates all at once, colors mix without numpy's overhead and are converted to OKLab once, and a family is listed in one pass. The frames are the same.
+- Draw and encode a film's frames on a thread of their own: the scene's Python no longer waits for the GPU or the encoder, but for the pixels it asks for and its video's end. The videos are the same.
+- Hold the API to its declared types, which ty checks where it is called: `add`, `ApplyFunction`, `SurroundingRectangle`, `ArcPolygonFromArcs` and `voices.Fal` no longer check them again as they run, and an `Animation` always has a mobject (`Wait` and a sound pass a plain `Mobject()`, where `None` stood). `interpolate` is typed by what it mixes (numbers, complex numbers or arrays), and `midpoint`, `center_of_mass`, `bezier`, `partial_bezier_points`, `subdivide_bezier` and `bezier_remap` by the array-likes they take (and `subdivide_bezier`'s count by numpy's integers too).
 - Show measured render times in a static benchmark chart.
 - Use a Markdown table for the benchmark comparison images.
 - Install ManimGX in the Quickstart with one command, `pip install manimgx`, and run `manimgx` directly throughout the docs.
@@ -35,6 +38,8 @@ The notable changes to ManimGX, release by release. The format follows
 
 - Keep resources needed by queued video frames until their transparency retries finish, fixing render failures during cache cleanup ([#16](https://github.com/academa-labs/manimgx/issues/16)).
 - Draw a storyboard picture without dropping the frame the film holds back, fixing `manimgx render` failures ("unknown shape") under memory pressure.
+- Draw a vectorized curve whose function gives a component as one number (`use_vectorized` with `lambda t: (t, t**2, 0)`), which failed with numpy's inhomogeneous-shape error.
+- Name a partite layout's vertex that is not in the graph, and a vertex's keywords or an edge's `tip_config` that are not a mapping, in the error raised.
 - Preserve the benchmark comparison images' aspect ratios when PyPI narrows the README table.
 - Credit Filament, whose code the 3D lighting is adapted from, in the README and the wheels' third-party notices.
 

@@ -2,7 +2,7 @@
 
 - Its family is a tree: whatever is added, removed, inserted or assigned, and however, no mobject
   holds itself (not even through another), and the family lists each member once, in preorder,
-  where it last occurs. Adding anything else is an error.
+  where it last occurs.
 - A transform is the same transform of its points: shifts, scales, turns, stretches and
   matrices, about the points their docstrings name (its box's center or edge by default), in
   any order, leave the family's points where plain arithmetic puts them.
@@ -250,17 +250,6 @@ class Family(RuleBasedStateMachine):
 
 TestFamily = Family.TestCase
 TestFamily.settings = settings(stateful_step_count=25)
-
-
-@pytest.mark.parametrize("value", [1, "a", None, np.zeros(3)])
-def test_only_mobjects_join_a_family(value: object) -> None:
-    for join in (
-        lambda g: g.add(value),
-        lambda g: g.add_to_back(value),
-        lambda g: g.insert(0, value),
-    ):
-        with pytest.raises(TypeError):
-            join(m.VGroup())
 
 
 class Transforms(RuleBasedStateMachine):

@@ -4,7 +4,8 @@ The engine is the Rust crate in [`rust/engine/`](https://github.com/academa-labs
 crates of the Rust workspace, [`rust/`](https://github.com/academa-labs/manimgx/tree/main/rust).
 maturin compiles it into the package as `manimgx._engine`, a Python extension module. It
 does three things: it draws frames on the GPU, encodes them into an MP4, and typesets text.
-Python decides what each frame shows; the engine makes the pixels. It also records a film as
+Python decides what each frame shows; the engine makes the pixels, on a thread of its own, so
+the scene goes on while its frames are drawn and encoded. It also records a film as
 a *take*, the same work written down, for ManimGX's player to play: one player, the same in a
 window of its own on this machine's screen (`manimgx preview`) and on a page's canvas, where
 the engine itself, compiled to WebAssembly, is the player.
@@ -39,9 +40,10 @@ The crate's dependencies do the heavy lifting:
 | File | What it holds |
 | --- | --- |
 | [`src/lib.rs`](https://github.com/academa-labs/manimgx/blob/main/rust/engine/src/lib.rs) | The crate: its builds (features), and the content key |
-| [`src/render.rs`](https://github.com/academa-labs/manimgx/blob/main/rust/engine/src/render.rs) | The GPU's player (`Player`, Python's too): the store of shapes, a frame's passes, the GPU |
+| [`src/render.rs`](https://github.com/academa-labs/manimgx/blob/main/rust/engine/src/render.rs) | The GPU's player (`Player`): the store of shapes, a frame's passes, the GPU |
 | [`src/lavapipe.rs`](https://github.com/academa-labs/manimgx/blob/main/rust/engine/src/lavapipe.rs) | Mesa's lavapipe, which a Linux wheel bundles, loaded where no GPU driver is |
 | [`src/python.rs`](https://github.com/academa-labs/manimgx/blob/main/rust/engine/src/python.rs) | The Python module: the `Player` and `Recorder` classes and the functions Python calls |
+| [`src/stage.rs`](https://github.com/academa-labs/manimgx/blob/main/rust/engine/src/stage.rs) | Python's player on a thread of its own: its calls queued, and carried out in order |
 | [`src/take.rs`](https://github.com/academa-labs/manimgx/blob/main/rust/engine/src/take.rs) | A take's messages, written and read |
 | [`src/pack.rs`](https://github.com/academa-labs/manimgx/blob/main/rust/engine/src/pack.rs) | A take's arrays, each coded against the one it replaces |
 | [`src/project.rs`](https://github.com/academa-labs/manimgx/blob/main/rust/engine/src/project.rs) | The projector: takes as they come, any frame of them drawn on demand, in bounded memory |
@@ -92,11 +94,21 @@ code against it.
   extends a path, and `evict` forgets what no frame shows any more. A frame is then a view
   and its records: `render` draws one and reads it back as RGBA, and `push` sends one to
   the video that `begin_export` started and `end_export` finishes.
+- **The player plays on a thread of its own.** A call is checked where Python makes it (a
+  mistake in what it sends is a `ValueError` there), then queued, and carried out on the
+  player's thread in the order it was made (`stage.rs`): so a scene does not wait for the
+  GPU or x264, but for what it asks of them (pixels, from `render` or `push` with `capture`;
+  the video, from `end_export`), and for room when the queue holds 256 MB not yet carried
+  out. An eviction waits for the
+  video's frames in flight that may be drawn again (their see-through fragments may
+  overflow), so none loses what it draws. What goes wrong on the player's thread abandons
+  the video and is raised at the next call. The player tells what it holds as it changes
+  (`held`, `pressured`), so the feed's budget is read without waiting.
 - **A take is the same calls, written down.** `Recorder` takes the uploads a `Player` takes,
   then `frame` for each frame, and writes them as messages: a take, which the projector reads
   back (see [The player](#the-player) and [The browser](#the-browser)). A film given `take`
   records into one.
-- **The GIL is released** while the engine draws and encodes, so other Python threads run.
+- **The GIL is released** while a call waits, so other Python threads run.
 - **One GPU per process**, brought up on a thread of its own once the process knows it will
   draw (`start_gpu`): a drawing command starts it before the rest of the command line loads,
   and a film with a video or frames as it begins. It comes up meanwhile, and the first frame

@@ -168,7 +168,7 @@ class ImageMobject(MeshMobject):
         height = h / self.scale_to_resolution * short if self.scale_to_resolution else 3
         return self.stretch_to_fit_height(height).stretch_to_fit_width(height * w / h)
 
-    def set_color(  # pyright: ignore[reportIncompatibleMethodOverride]  # ty: ignore[invalid-method-override]  # CE's: an image's tint, then its alpha
+    def set_color(  # ty: ignore[invalid-method-override]  # CE's: an image's tint, then its alpha
         self,
         color: ParsableManimColor = YELLOW_C,
         alpha: float | None = None,

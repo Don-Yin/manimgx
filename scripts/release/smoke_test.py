@@ -83,10 +83,15 @@ def main() -> None:
 
 
 def take() -> None:
+    import manimgx as m
+
     scene: dict[str, object] = {}
     exec(scene_source(), scene)
+    smoke = scene["Smoke"]
+    assert isinstance(smoke, type)
+    assert issubclass(smoke, m.Scene)
     chunks: list[bytes] = []
-    film = scene["Smoke"]().render(take=chunks.append)  # ty: ignore[call-non-callable]
+    film = smoke().render(take=chunks.append)
     if not film.frame_count or not b"".join(chunks):
         sys.exit("ManimGX recorded no take")
     validate_take(b"".join(chunks), film.frame_count)

@@ -31,7 +31,7 @@ __all__ = [
     "Torus",
 ]
 from collections.abc import Callable, Hashable, Iterable, Sequence
-from typing import TYPE_CHECKING, ClassVar, Literal, Self, Unpack, cast
+from typing import TYPE_CHECKING, ClassVar, Literal, Self, Unpack
 
 import numpy as np
 from typing_extensions import TypedDict
@@ -72,6 +72,7 @@ from manimgx.drawing.paint import (
     ManimColor,
     ParsableManimColor,
     Style,
+    _paired,
     _Style,
     rgbas_by_value,
 )
@@ -424,11 +425,8 @@ class Surface(MeshMobject):
             )
             return self
         low, high = (axes.x_range, axes.y_range, axes.z_range or (0, 0))[axis][:2]
-        if all(isinstance(c, (tuple, list)) and len(c) == 2 for c in colorscale):
-            pivots = [
-                float(cast("tuple[ParsableManimColor, float]", c)[1])
-                for c in colorscale
-            ]
+        if _paired(colorscale):
+            pivots = [p for _, p in colorscale]
             low, high = min(pivots), max(pivots)
         values = np.asarray(axes.point_to_coords(self.points), dtype=float)[:, axis]
         span = high - low if high > low else 1.0

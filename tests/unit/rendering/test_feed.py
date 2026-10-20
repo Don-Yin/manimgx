@@ -33,7 +33,7 @@ keeps the player's store in step with its own books; the player derives what dra
 import contextlib
 import gc
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -46,6 +46,7 @@ from tests.scenes import frames, scene_3d
 
 import manimgx as m
 from manimgx._engine import Player, Recorder, digest
+from manimgx.drawing.geometry import Path
 from manimgx.rendering import feed
 
 
@@ -354,7 +355,7 @@ def test_batched_reveals_follow_the_same_pace_as_individual_frames(
 
 def record_of(mob: m.Mobject, sink: "Sink | Recorder") -> np.void:
     """The record a feed of its own makes of a mobject alone, in a 2D view."""
-    feeder = feed.Feeder(32, 32, sink)  # ty: ignore[invalid-argument-type]
+    feeder = feed.Feeder(32, 32, sink)
     objects: list[m.Mobject] = [mob]
     made = feed.unpack(
         feeder.record(mob, m.Camera(), False, objects, 32, 32, [], set())
@@ -483,7 +484,6 @@ class Sink:
         self.kinds: dict[int, str] = {}  # what each key was uploaded as
         self.vertices: dict[int, int] = {}  # a mesh's vertex count, as sent
         self.failing: set[str] = set()
-        self.protected: set[int] = set()  # resources retained by queued frames
 
     def _add(self, kind: str, key: int, parts: list[Part], *args: object) -> None:
         if kind in self.failing:
@@ -498,7 +498,7 @@ class Sink:
         self.resident[key] = content
 
     def add_path(
-        self, key: int, points: bytes, subpaths: bytes, ca: list[float]
+        self, key: int, points: bytes, subpaths: bytes, ca: Sequence[float]
     ) -> None:
         self._add(
             "path", key, [(points, "<f8"), (subpaths, None)], points, subpaths, ca
@@ -526,18 +526,17 @@ class Sink:
     def grow_path(self, key: int, points: bytes, closed: bool = False) -> None:
         raise AssertionError("no growing paths here")
 
-    def evict(self, keys: list[int]) -> list[int]:
+    def evict(self, keys: Sequence[int]) -> None:
         if "evict" in self.failing:
             self.failing.discard("evict")
             raise Injected("evict")
-        accepted = self.engine.evict([key for key in keys if key not in self.protected])
-        for key in accepted:
+        self.engine.evict(keys)
+        for key in keys:
             assert key in self.resident, f"{key:x} evicted, never resident"
             del self.resident[key]
-        return accepted
 
-    def stored(self) -> tuple[int, int]:
-        return self.engine.stored()
+    def held(self) -> int:
+        return self.engine.held()
 
 
 def test_a_tween_materializes_only_the_frames_consumed_and_reloads_evicted_values() -> (
@@ -552,7 +551,7 @@ def test_a_tween_materializes_only_the_frames_consumed_and_reloads_evicted_value
     leaf = start.copy()
     progress = np.tile(np.linspace(0.1, 0.9, 25), 3)
     camera, path, sink = m.Camera(), m.straight_path(), Sink()
-    feeder = feed.Feeder(32, 32, sink)  # ty: ignore[invalid-argument-type]
+    feeder = feed.Feeder(32, 32, sink)
     frames = iter(
         feeder.tween(
             camera,
@@ -566,7 +565,7 @@ def test_a_tween_materializes_only_the_frames_consumed_and_reloads_evicted_value
         if number == 0:
             assert sum(kind == "points" for kind in sink.kinds.values()) <= 2
         expected_sink = Sink()
-        expected = feed.Feeder(32, 32, expected_sink)  # ty: ignore[invalid-argument-type]
+        expected = feed.Feeder(32, 32, expected_sink)
         alone = start.copy()
         alone.interpolate(start, end, float(t), path)
         assert records == expected.frame(camera, [alone])[1]
@@ -593,15 +592,22 @@ def test_streaming_still_mixes_whole_keyframe_intervals(
         start.copy().shift(m.UP),
     ]
     leaf, sink, camera = start.copy(), Sink(), m.Camera()
-    feeder = feed.Feeder(32, 32, sink)  # ty: ignore[invalid-argument-type]
+    feeder = feed.Feeder(32, 32, sink)
     intervals = np.repeat([0, 1, 0], 30)
     progress = np.tile(np.linspace(0, 1, 30), 3)
     batches: list[int] = []
     mix = feeder.mix
 
-    def measured(*args: object) -> np.ndarray | None:
-        batches.append(len(args[3]))  # ty: ignore[invalid-argument-type]
-        return mix(*args)  # ty: ignore[invalid-argument-type]
+    def measured(
+        a: m.Mobject,
+        b: m.Mobject,
+        path: Path,
+        t: np.ndarray,
+        args: tuple,
+        live: np.void | None,
+    ) -> np.ndarray | None:
+        batches.append(len(t))
+        return mix(a, b, path, t, args, live)
 
     monkeypatch.setattr(feeder, "mix", measured)
     frames = feeder.tween(
@@ -642,7 +648,7 @@ def test_a_delayed_tween_can_return_before_its_start_after_eviction(
     camera, sink = m.Camera(), Sink()
     if fixed:
         camera.fixed_in_frame_mobjects.add(leaf)
-    feeder = feed.Feeder(32, 32, sink)  # ty: ignore[invalid-argument-type]
+    feeder = feed.Feeder(32, 32, sink)
     original = feeder.frame(camera, [leaf])[1]
     for number, (_, records) in enumerate(feeder.tween(camera, [leaf], leaves)):
         if number in (0, 3):
@@ -660,7 +666,7 @@ def test_a_delayed_tween_can_return_before_its_start_after_eviction(
 
 def test_pressure_preserves_pending_current_and_camera_resources() -> None:
     sink = Sink()
-    feeder = feed.Feeder(32, 32, sink)  # ty: ignore[invalid-argument-type]
+    feeder = feed.Feeder(32, 32, sink)
     keys = [
         feeder.path(m.RegularPolygon(n)._geometry.terms[0][1])[0] for n in range(3, 7)
     ]
@@ -770,7 +776,7 @@ class Residency(RuleBasedStateMachine):
     @initialize()
     def begin(self) -> None:
         self.sink = Sink()
-        self.feeder = feed.Feeder(32, 32, self.sink)  # ty: ignore[invalid-argument-type]
+        self.feeder = feed.Feeder(32, 32, self.sink)
         self.camera = m.Camera()
         self.pool: list[m.Mobject] = [mobject(k, 0) for k in range(6)]
         self.held: list[Handed] = []  # the direct uploads whose inputs the test holds
@@ -849,12 +855,6 @@ class Residency(RuleBasedStateMachine):
             self.feeder.sweep()
         self.sink.failing.discard("evict")
 
-    @rule(which=st.lists(st.integers(0, 63), max_size=6))
-    def pending(self, which: list[int]) -> None:
-        """Queued frames may retain some resources until a later sweep."""
-        keys = list(self.sink.resident)
-        self.sink.protected = {keys[i % len(keys)] for i in which} if keys else set()
-
     @rule(kind=st.sampled_from(["path", "points", "mesh", "rows", "texture", "evict"]))
     def fail_next(self, kind: str) -> None:
         self.sink.failing.add(kind)
@@ -911,7 +911,6 @@ class Residency(RuleBasedStateMachine):
         go of is collected: a key in flight (a failed upload's) holds its input until then."""
         self.held, self.pool = [], []
         self.sink.failing.clear()
-        self.sink.protected.clear()
         self.feeder.frame(
             self.camera, []
         )  # a frame of nothing: the last shown holds nothing
@@ -928,7 +927,7 @@ TestResidency.settings = settings(max_examples=60, stateful_step_count=40)
 
 def test_a_picture_is_not_one_of_the_films_frames() -> None:
     sink = Sink()
-    feeder = feed.Feeder(32, 32, sink)  # ty: ignore[invalid-argument-type]
+    feeder = feed.Feeder(32, 32, sink)
     camera = m.Camera()
     feeder.frame(camera, [m.Square(fill_opacity=1)])
     held = set(sink.resident)

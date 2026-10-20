@@ -1,7 +1,7 @@
 //! A film's video, natively: each frame drawn, converted to NV12 on the GPU where it changed,
 //! read back and handed to x264 on a thread of its own (see `encode`), muxed into an MP4.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -42,18 +42,39 @@ impl Player {
         dirty
     }
 
-    pub(crate) fn push_frames(&mut self, gpu: &mut Gpu, frames: Vec<Frame>, repeat: u32, key: bool, capture: bool) -> Result<(), String> {
+    /// The video's next frame, shown for `repeat` frames (`key`: a keyframe, where a player can
+    /// start): drawn, and converted only where a change can touch it; with `capture`, its pixels
+    /// too, the same draw's (RGBA8 rows, top to bottom), read into it once its retries are done.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn push_frames(&mut self, gpu: &mut Gpu, frames: Vec<Frame>, repeat: u32, key: bool, capture: Option<&mut [u8]>) -> Result<(), String> {
         let mut export = self.export.take().ok_or("no export is open")?;
         let result = (|| {
-            // A pixel consumer waits for this frame. Settle older draws before making it,
-            // so their overflow retries cannot replace its captured pixels.
-            if capture {
-                while !export.pending.is_empty() { self.retire(gpu, &mut export)?; }
+            // the frames before it first: their retries cannot then replace its pixels
+            if capture.is_some() {
+                while !export.pending.is_empty() {
+                    self.retire(gpu, &mut export)?;
+                }
             }
-            self.push_into(gpu, &mut export, frames, repeat, key, capture)?;
-            if capture {
+            self.push_into(gpu, &mut export, frames, repeat, key, capture.is_some())?;
+            if let Some(into) = capture {
                 self.retire(gpu, &mut export)?;
-                self.map_pixels(gpu)?;
+                self.read_pixels(gpu, into)?;
+            }
+            Ok(())
+        })();
+        self.export = Some(export);
+        result
+    }
+
+    /// Settle the video's frames in flight that may be drawn again (their see-through fragments
+    /// may overflow the lists: see `retire`), and those before them: nothing they draw may be
+    /// evicted or changed until then.
+    #[cfg(feature = "python")]
+    pub(crate) fn settle(&mut self, gpu: &mut Gpu) -> Result<(), String> {
+        let Some(mut export) = self.export.take() else { return Ok(()) };
+        let result = (|| {
+            while export.pending.iter().any(|p| p.kept.is_some()) {
+                self.retire(gpu, &mut export)?;
             }
             Ok(())
         })();
@@ -83,13 +104,15 @@ impl Player {
         // read (see `retire`)
         let lists = self.lists.as_ref().filter(|_| composited && !listed.is_empty()).map(|l| l.capacity);
         self.convert(gpu, export, &mut command, &listed, slot, lists.is_some());
-        if capture { self.copy_pixels(&mut command); }
+        if capture {
+            self.copy_pixels(&mut command);
+        }
         gpu.queue.submit(Some(command.finish()));
         export.map(slot, listed.len());
         gpu.device.poll(wgpu::PollType::Poll).map_err(|e| e.to_string())?;
         let first = export.previous.is_none();
         let kept = lists.map(|capacity| (frames.clone(), capacity));
-        export.pending.push_back(Pending { slot, listed, repeat, first, key, kept, capture, keys: None });
+        export.pending.push_back(Pending { slot, listed, repeat, first, key, kept, capture });
         export.previous = frames.into_iter().last();
         export.drawn += 1;
         Ok(())
@@ -147,7 +170,9 @@ impl Player {
                     let (mut command, ..) = self.encode(gpu, frames)?;
                     capacity = self.lists.as_ref().map_or(0, |l| l.capacity);
                     self.convert(gpu, export, &mut command, &p.listed, p.slot, true);
-                    if p.capture { self.copy_pixels(&mut command); }
+                    if p.capture {
+                        self.copy_pixels(&mut command);
+                    }
                     gpu.queue.submit(Some(command.finish()));
                     export.map(p.slot, p.listed.len());
                     export.wait(&gpu.device, p.slot)?;
@@ -172,8 +197,7 @@ pub(crate) struct Pending {
     first: bool,
     key: bool,
     kept: Option<(Vec<Frame>, u64)>, // a frame composited through the lists, and their capacity
-    keys: Option<Vec<u64>>, // retry dependencies, collected only when eviction asks
-    capture: bool, // copy its final successful draw for a simultaneous pixel consumer
+    capture: bool,                   // its pixels are waited for: a retry copies them again
 }
 
 /// A video being written: each frame drawn, converted to NV12 where it changed, read back and
@@ -197,9 +221,9 @@ pub(crate) struct Export {
 }
 
 impl Export {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(gpu: &Gpu, width: u32, height: u32, fps: u32, preset: &str, crf: f32, options: &[(String, String)], path: &str) -> Result<Self, String> {
-        let worker = encode::Worker::new(encode::Encoder::new(width, height, fps, preset, crf, options, path)?, width as usize, height as usize);
+    /// A video of `width` × `height` frames, which `encoder` encodes.
+    pub(crate) fn new(gpu: &Gpu, encoder: encode::Encoder, width: u32, height: u32) -> Result<Self, String> {
+        let worker = encode::Worker::new(encoder, width as usize, height as usize);
         let size = (width.div_ceil(16) * height.div_ceil(16) * 384) as u64;
         let buffer = |label, usage| gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size: size + COUNT_BYTES, usage, mapped_at_creation: false });
         let convert = gpu.device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -226,32 +250,6 @@ impl Export {
             converted: 0,
             start: Instant::now(),
         })
-    }
-
-    /// Keep uploads a queued retry may still draw, in any of its camera views. Cache each
-    /// pending frame's unique keys so repeated pressure does not rescan all its records.
-    pub(crate) fn evictable(&mut self, mut keys: Vec<u64>) -> Vec<u64> {
-        if keys.is_empty() {
-            return keys;
-        }
-        let candidates: HashSet<u64> = keys.iter().copied().collect();
-        let mut blocked = HashSet::new();
-        for pending in &mut self.pending {
-            if let Some((frames, _)) = &pending.kept {
-                let cached = pending.keys.get_or_insert_with(|| {
-                    let mut unique = HashSet::new();
-                    for frame in frames {
-                        for slots in crate::take::slots(bytemuck::cast_slice(&frame.records)) {
-                            unique.extend(slots.into_iter().filter(|&key| key != 0));
-                        }
-                    }
-                    unique.into_iter().collect()
-                });
-                blocked.extend(cached.iter().copied().filter(|key| candidates.contains(key)));
-            }
-        }
-        keys.retain(|key| !blocked.contains(key));
-        keys
     }
 
     /// Read `slot` back once its frame is converted: its `listed` macroblocks, and the lists'

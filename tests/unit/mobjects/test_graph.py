@@ -12,6 +12,8 @@
   partitions and root vertex given), and what it does to that graph stays there; a layout by
   name lays the vertices out as a graph made afresh with that layout would.
 - Spectral coordinates depend on Laplacian eigenspaces, independent of their solved basis.
+- A partite layout's partitions hold only the graph's vertices.
+- A vertex's or an edge's own keywords, and an edge's `tip_config`, are mappings.
 - Each edge uses its current settings; removing it releases those settings and their keys.
 - A copy goes on apart: what is done to it leaves the graph it was copied from.
 """
@@ -552,3 +554,15 @@ def test_removing_a_vertex_releases_the_keys_of_its_edge_settings() -> None:
     del key
     gc.collect()
     assert reference() is None
+
+
+def test_a_partitions_vertices_are_the_graphs() -> None:
+    with pytest.raises(ValueError, match="3, in partition 1, is not a vertex"):
+        m.Graph([1, 2], [(1, 2)], layout="partite", partitions=[[1], [3]])
+
+
+def test_own_keywords_are_mappings() -> None:
+    with pytest.raises(TypeError, match="1's own keywords are not a mapping"):
+        m.Graph([1, 2], [(1, 2)], vertex_config={1: "red"})
+    with pytest.raises(TypeError, match="tip_config is not a mapping"):
+        m.DiGraph([1, 2], [(1, 2)], edge_config={"tip_config": 3})

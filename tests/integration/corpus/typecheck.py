@@ -46,7 +46,7 @@ STRICT = (
 )
 
 _REVEAL = re.compile(r"^info\[revealed-type\] Revealed type: `(?P<type>.*)`$")
-_SUPPRESSION = re.compile(r"#\s*(?:type|ty|pyright)\s*:\s*ignore")
+_SUPPRESSION = re.compile(r"#\s*ty\s*:\s*ignore")
 _IMPRECISE = re.compile(r"\bUnknown\b|\bAny\b|@Todo")
 _CALLABLE = re.compile(
     r"^(bound method |Overload\[|def |<class |<module |<bound method |<function"

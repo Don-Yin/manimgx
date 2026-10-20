@@ -31,10 +31,11 @@ manifests change, so there is no separate build step.
 ## Rules
 
 - No `Any` in public signatures: keyword arguments are a `TypedDict` taken with `Unpack`.
-- ty honors `# ty: ignore[rule]` and a bare `# type: ignore`, not `# type: ignore[code]`, and
-  an unused suppression is an error. ruff's formatter splits a line too long without its
-  trailing suppression and moves the suppression to the last line, so run `just check` after
-  `just format`.
+- The checkers are ty and ruff. A declared type is trusted, not checked again as the code
+  runs; a suppression is `# ty: ignore[rule]` (ty reads no `# type: ignore`), only where no
+  type can say it, and an unused one is an error. ruff's formatter splits a line too long
+  without its trailing suppression and moves the suppression to the last line, so run
+  `just check` after `just format`.
 - Manim CE is the source of the API, not of the behavior: don't copy CE's behavior, or its
   bugs, for compatibility. The corpus is the specification.
 - Measure before and after any change to the engine or the render path (`just bench main`);

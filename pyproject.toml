@@ -262,9 +262,11 @@ include = ["src", "fonts", "docs", "scripts", "benchmarks", "tests"]
 exclude = ["benchmarks/scenes", "tests/integration/cases"]
 
 [tool.ty.analysis]
+# a suppression is ty's own, `# ty: ignore[rule]`: `# type: ignore` is a comment like any other
+respect-type-ignore-comments = false
 # svgelements declares an ISO-8859-1 source encoding, which ty does not read (it sees an empty
-# module); pyright checks its uses against the source. Manim CE is installed only with the `ce`
-# group: the corpus's CE runner is checked the same with it or without it
+# module): its names are Any. Manim CE is installed only with the `ce` group: the corpus's CE
+# runner is checked the same with it or without it
 replace-imports-with-any = ["svgelements", "svgelements.*", "manim", "manim.**"]
 allowed-unresolved-imports = ["manim", "manim.**"]
 

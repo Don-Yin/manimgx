@@ -12,7 +12,7 @@ import warnings
 from collections.abc import Iterator, Sequence
 from functools import reduce
 from math import ceil
-from typing import TYPE_CHECKING, ClassVar, Literal, Self, Unpack, cast
+from typing import TYPE_CHECKING, ClassVar, Literal, Self, Unpack
 from warnings import deprecated
 
 import numpy as np
@@ -826,9 +826,7 @@ class ArcBetweenPoints(Arc):
         if radius is None:
             center = self.get_arc_center(warning=False)
             if not self._failed_to_get_center:
-                self.radius = cast(
-                    float, np.linalg.norm(np.array(start) - np.array(center))
-                )
+                self.radius = float(np.linalg.norm(np.array(start) - np.array(center)))
             else:
                 self.radius = np.inf
 
@@ -1463,10 +1461,6 @@ class ArcPolygonFromArcs(VMobject):
     """
 
     def __init__(self, *arcs: Arc | ArcBetweenPoints, **kwargs: Unpack[Style]) -> None:
-        if not all(isinstance(m, (Arc, ArcBetweenPoints)) for m in arcs):
-            raise ValueError(
-                "All ArcPolygon submobjects must be of type Arc/ArcBetweenPoints"
-            )
         super().__init__(**kwargs)
         self.add(*arcs)
         self.arcs = [*arcs]

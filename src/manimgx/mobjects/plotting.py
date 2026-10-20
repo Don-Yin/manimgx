@@ -109,6 +109,7 @@ if TYPE_CHECKING:
     from manimgx.typing import (
         ManimTextLabel,
         Point3D,
+        Point3D_Array,
         Point3DLike,
         Point3DLike_Array,
         Vector3D,
@@ -369,10 +370,10 @@ class ParametricFunction(VMobject):
     The function is sampled every `t_step`, and at `t_max`, and the samples are joined
     by a smooth curve through them (or by straight segments, without
     `use_smoothing`). Where the function jumps, give its `discontinuities`: the curve
-    is drawn in pieces between them, each stopping `dt` short. Unless
-    `use_vectorized`, the function is first tried on all the values of t at once, as
-    an array, and checked against single calls; a function that does not take arrays
-    is called once per value.
+    is drawn in pieces between them, each stopping `dt` short. The function is first
+    tried on all the values of t at once, as an array, and checked against single calls
+    (unless `use_vectorized` vouches for it); a function that does not take arrays is
+    called once per value.
 
     The discontinuities are kept as the list they were when the curve was made, before
     range filtering, so copies and regenerated curves keep all its breaks.
@@ -391,8 +392,8 @@ class ParametricFunction(VMobject):
         use_smoothing: Whether the samples are joined by a smooth curve through them,
             rather than by straight segments.
         use_vectorized: Whether `function` takes all the values of t at once, as an
-            array, and returns the arrays of x, y and z (a z that is not an array is
-            taken as 0).
+            array, and gives what single calls would: it is then not checked against
+            them. Its x, y and z may each be an array or one number for every t.
 
     Examples:
         ```python
@@ -438,8 +439,14 @@ class ParametricFunction(VMobject):
         def internal_parametric_function(t: float) -> Point3D:
             return np.asarray(function(t))
 
+        # sampled as given, on all the values of t at once if it can be: a function, as
+        # copies share one, whatever callable was given
+        def given(t: float) -> Point3DLike:
+            return function(t)
+
         self.function = internal_parametric_function
         """The curve's function: from t to its point, as an array."""
+        self._given = given
         if len(t_range) == 2:
             t_range = (*t_range, 0.01)
         self.scaling = scaling
@@ -494,15 +501,7 @@ class ParametricFunction(VMobject):
                     self.scaling.function(t2),
                 ]
             )
-            if self.use_vectorized:  # the function takes all the parameters at once
-                x, y, z = cast(
-                    "Callable[[np.ndarray], Sequence[np.ndarray]]", self.function
-                )(t_range)
-                if not isinstance(z, np.ndarray):
-                    z = np.zeros_like(x)
-                points = np.stack([x, y, z], axis=1)
-            else:
-                points = sample(self.function, t_range)
+            points = sample(self._given, t_range, checked=not self.use_vectorized)
             self.start_new_path(points[0])
             self.add_points_as_corners(points[1:])
         if self.use_smoothing:
@@ -735,6 +734,17 @@ class NumberLineOptions(_Tipped, total=False, closed=True):
     numbers_to_include: Iterable[float] | None
     """The numbers to write, instead of the ticks': given, they are written even
     without `include_numbers` (default None: the ticks')."""
+
+
+def _along(offsets: np.ndarray, direction: Vector3D) -> np.ndarray:
+    """The projections of an offset, or of an array of them, onto a unit direction. Along a
+    coordinate axis, as a straight number line runs, a projection is that coordinate times
+    ±1: what the dot product gives in any order of summing, so that a point's number is the
+    same alone and among others."""
+    (nonzero,) = np.nonzero(direction)
+    if len(nonzero) == 1:
+        return offsets[..., nonzero[0]] * direction[nonzero[0]]
+    return np.dot(offsets, direction)
 
 
 class NumberLine(Line):
@@ -1069,7 +1079,7 @@ class NumberLine(Line):
         point = np.asarray(point, dtype=float)
         start, end = self.get_start(), self.get_end()
         unit_vect = normalize(end - start)
-        proportion: float = np.dot(point - start, unit_vect) / np.dot(
+        proportion: float = _along(point - start, unit_vect) / np.dot(
             end - start, unit_vect
         )
         # along the range, then through the scale, as number_to_point goes back
@@ -2496,20 +2506,28 @@ class Axes(VGroup):
             a = max(a, bounded_graph.t_min)
             b = min(b, bounded_graph.t_max)
         if bounded_graph is None:
-            points = (
-                [self.c2p(a), graph.function(a)]
-                + [p for p in graph.points if a <= self.p2c(p)[0] <= b]
-                + [graph.function(b), self.c2p(b)]
-            )
+            points = [
+                self.c2p(a),
+                graph.function(a),
+                *self._points_between(graph, a, b),
+                graph.function(b),
+                self.c2p(b),
+            ]
         else:
             graph_points, bounded_graph_points = (
-                [g.function(a)]
-                + [p for p in g.points if a <= self.p2c(p)[0] <= b]
-                + [g.function(b)]
+                [g.function(a), *self._points_between(g, a, b), g.function(b)]
                 for g in (graph, bounded_graph)
             )
             points = graph_points + bounded_graph_points[::-1]
         return Polygon(*points, **kwargs).set_opacity(opacity).set_color(color)
+
+    def _points_between(
+        self, graph: ParametricFunction, a: float, b: float
+    ) -> Point3D_Array:
+        """The graph's points whose x on the axes is from `a` to `b`, in order: their
+        coordinates read all at once."""
+        x = self.p2c(graph.points)[:, 0]
+        return graph.points[(a <= x) & (x <= b)]
 
     def angle_of_tangent(
         self, x: float, graph: ParametricFunction, dx: float = 1e-08
@@ -3685,7 +3703,7 @@ class PolarPlane(_Plane):
             case _:
                 return MathTex(f"{turns:g}", font_size=size)
 
-    def add_coordinates(  # pyright: ignore[reportIncompatibleMethodOverride]  # ty: ignore[invalid-method-override]  # CE's: a polar plane numbers radii and angles
+    def add_coordinates(  # ty: ignore[invalid-method-override]  # CE's: a polar plane numbers radii and angles
         self,
         r_values: Iterable[float] | None = None,
         a_values: Iterable[float] | None = None,
@@ -3837,7 +3855,7 @@ class ComplexPlane(NumberPlane):
                 )
         return self.coordinate_labels
 
-    def add_coordinates(  # pyright: ignore[reportIncompatibleMethodOverride]  # ty: ignore[invalid-method-override]  # CE's: numbers, not per-axis values
+    def add_coordinates(  # ty: ignore[invalid-method-override]  # CE's: numbers, not per-axis values
         self, *numbers: float | complex, **kwargs: Unpack[DecimalNumberOptions]
     ) -> Self:
         """Label numbers of the plane, as

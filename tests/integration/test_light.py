@@ -21,6 +21,7 @@ unchanged. A mobject without a material is shaded as it always was, whatever the
 import itertools
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -330,9 +331,9 @@ def test_an_environments_sun_casts_a_shadow(tmp_path: Path) -> None:
 
 
 def test_agx_rolls_off_what_clipping_saturates() -> None:
-    def shown(tone: str) -> np.ndarray:
+    def shown(tone: Literal["linear", "agx"]) -> np.ndarray:
         def build(scene: m.ThreeDScene) -> None:
-            scene.camera.tone_mapping = tone  # type: ignore
+            scene.camera.tone_mapping = tone
             scene.add(plane(), m.SunLight(5 * m.OUT, intensity=4.0))
             scene.wait(0.1)
 

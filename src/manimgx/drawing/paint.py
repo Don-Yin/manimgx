@@ -204,12 +204,18 @@ def from_oklab(lab: Floats) -> Floats:
 
 
 _LABS: Memo[int, tuple[Floats, Floats]] = Memo(1 << 12)
+_COLOR_LABS: Memo[bytes, Floats] = Memo(1 << 12)
 
 
 def _lab(rgba: Floats) -> Floats:
     """OKLab of an RGBA array's colors — once per array when the array cannot change (a
-    paint's rows are read-only): a tween mixes the same two paints on every frame."""
+    paint's rows are read-only): a tween mixes the same two paints on every frame; and once
+    per value for one color (a color's own array): an updater mixes the same colors on
+    every frame."""
     if rgba.flags.writeable:
+        if rgba.shape == (4,):
+            rgb = rgba[:3]
+            return _COLOR_LABS.recall(rgb.tobytes(), lambda: frozen(to_oklab(rgb)))
         return to_oklab(rgba[..., :3])
     known = _LABS.recall(id(rgba), lambda: (rgba, to_oklab(rgba[..., :3])))
     if known[0] is not rgba:  # another array, since gone, had its id
@@ -235,6 +241,13 @@ def mix_rgba(a: Floats, b: Floats, t: float | Floats) -> Floats:
     Returns:
         The mixed colors, an array of the same shape; exactly `a` at 0 and `b` at 1.
     """
+    if a.shape == b.shape == (4,) and not isinstance(t, np.ndarray):
+        return _mix_color(a, b, t)
+    return _mix_rows(a, b, t)
+
+
+def _mix_rows(a: Floats, b: Floats, t: float | Floats) -> Floats:
+    """`mix_rgba`, row by row, in numpy: any shape."""
     rows = isinstance(t, np.ndarray) and t.ndim > 0
     if rows:
         t = t.astype(float)[..., None]
@@ -259,6 +272,32 @@ def mix_rgba(a: Floats, b: Floats, t: float | Floats) -> Floats:
     if same.any():
         mixed[..., :3] = np.where(same, a[..., :3], mixed[..., :3])
     return mixed if not rows else np.where(t <= 0.0, a, np.where(t >= 1.0, b, mixed))
+
+
+def _mix_color(a: Floats, b: Floats, t: float) -> Floats:
+    """`mix_rgba` of one color and another: `_mix_rows`'s arithmetic, step by step, on
+    floats (each step rounds as numpy's does), around numpy's OKLab conversion. An updater
+    mixes one color at a time, every frame, where numpy's calls cost more than the
+    arithmetic they do."""
+    if t <= 0.0:
+        return np.array(a, dtype=float)
+    if t >= 1.0:
+        return np.array(b, dtype=float)
+    (ar, ag, ab, aa), (br, bg, bb, ba) = a.tolist(), b.tolist()
+    if (ar, ag, ab) == (br, bg, bb):  # one color: only opacity moves
+        out = np.array(a, dtype=float)
+        out[3] = aa * (1.0 - t) + ba * t
+        return out
+    wa, wb = aa * (1.0 - t), ba * t
+    opacity = wa + wb
+    la, lb = _lab(a).tolist(), _lab(b).tolist()
+    if opacity > 1e-9:
+        lab = [
+            (x * wa + y * wb) / max(opacity, 1e-9) for x, y in zip(la, lb, strict=True)
+        ]
+    else:
+        lab = [x * (1.0 - t) + y * t for x, y in zip(la, lb, strict=True)]
+    return np.array([*from_oklab(np.array(lab)).tolist(), opacity])
 
 
 type ParsableManimColor = ManimColor | str | int | Sequence[float] | np.ndarray
@@ -412,7 +451,7 @@ class ManimColor(str):
         Returns:
             A new color.
         """
-        return ManimColor(tuple(mix_rgba(self._rgba, other._rgba, alpha)))
+        return _made(ManimColor, mix_rgba(self._rgba, other._rgba, alpha))
 
     def opacity(self, opacity: float) -> "ManimColor":
         """This color with another opacity.
@@ -585,7 +624,7 @@ class ManimColor(str):
 
 
 def _bytes(rgba: np.ndarray) -> list[int]:
-    return [round(float(c) * 255) for c in np.clip(rgba, 0.0, 1.0)]
+    return [round(min(max(c, 0.0), 1.0) * 255) for c in rgba.tolist()]
 
 
 def _hex(rgba: np.ndarray) -> str:
@@ -719,7 +758,7 @@ def interpolate_color(a: ManimColor, b: ManimColor, alpha: float) -> ManimColor:
                 self.add(swatches.arrange(buff=0.5))
         ```
     """
-    return ManimColor(a).interpolate(ManimColor(b), alpha)
+    return a.interpolate(b, alpha)
 
 
 def color_gradient(
@@ -788,6 +827,13 @@ type Colorscale = (
 pairs, each color at its value (see [colors_by_value][manimgx.colors_by_value])."""
 
 
+def _paired(
+    colorscale: Colorscale,
+) -> TypeIs[Sequence[tuple[ParsableManimColor, float]]]:
+    """Is the colorscale (color, value) pairs, rather than colors spread evenly?"""
+    return all(isinstance(c, (tuple, list)) and len(c) == 2 for c in colorscale)
+
+
 def colors_by_value(
     colorscale: Colorscale, values: Iterable[float], low: float, high: float
 ) -> list[ManimColor]:
@@ -834,13 +880,11 @@ def rgbas_by_value(
         An (n, 4) array, a row per value, each from 0 to 1.
     """
     # the pivots are the colors' values, given or spread evenly over [low, high]
-    if all(isinstance(c, (tuple, list)) and len(c) == 2 for c in colorscale):
-        pairs = cast("Sequence[tuple[ParsableManimColor, float]]", colorscale)
-        colors = np.array([ManimColor(c).to_rgba() for c, _ in pairs])
-        pivots = np.array([p for _, p in pairs], dtype=float)
+    if _paired(colorscale):
+        colors = np.array([ManimColor(c).to_rgba() for c, _ in colorscale])
+        pivots = np.array([p for _, p in colorscale], dtype=float)
     else:
-        scale = cast("Sequence[ParsableManimColor]", colorscale)
-        colors = np.array([ManimColor(c).to_rgba() for c in scale])
+        colors = np.array([ManimColor(c).to_rgba() for c in colorscale])
         pivots = np.linspace(low, high, len(colors))
     v = np.asarray(values, dtype=float).reshape(-1)
     i = np.searchsorted(pivots, v, side="right")  # the first pivot above each value
@@ -1654,11 +1698,12 @@ class Paint:
         for name in _LERPED:
             x, y = getattr(a, name), getattr(b, name)
             changes[name] = y if alpha == 1.0 or x is y else interpolate(x, y, alpha)
-        for (
-            name
-        ) in _WIDTHS:  # past its ends an overshooting rate function: no width < 0
-            if cast("float", changes[name]) < 0:  # (a field kept is kept by identity)
-                changes[name] = 0.0
+        for name, w, v in (
+            ("stroke_width", a.stroke_width, b.stroke_width),
+            ("background_width", a.background_width, b.background_width),
+        ):  # past its ends an overshooting rate function: no width < 0
+            width = v if alpha == 1.0 or w is v else interpolate(w, v, alpha)
+            changes[name] = 0.0 if width < 0 else width
         for name, slot in _SLOTS.items():
             x, y = getattr(a, slot), getattr(b, slot)  # None: a tween's
             if alpha >= 1.0 or alpha <= 0.0:
@@ -1676,14 +1721,7 @@ class Paint:
         return self._but(changes)  # a frame's paint: nothing to remember it by
 
 
-_WIDTHS = ("stroke_width", "background_width")
-_LERPED = (
-    "stroke_width",
-    "background_width",
-    "sheen_direction",
-    "sheen_factor",
-    "trim",
-)
+_LERPED = ("sheen_direction", "sheen_factor", "trim")
 
 
 def _kept(name: str, value: object) -> object:
@@ -1728,9 +1766,26 @@ _ARRAYS = ("_fill", "_stroke", "_background", "sheen_direction", "trim")
 _NUMERIC = frozenset({"stroke_width", "background_width", "sheen_factor", "dash"})
 
 
-class PaintAttribute[G, S = G]:
-    """A CE style attribute of a mobject (`mob.joint_type`), kept in its paint's `field` (G: what
-    is read, S: what may be set; the paint keeps arrays as float values)."""
+class PaintAttribute[T]:
+    """A CE style attribute of a mobject (`mob.joint_type`), kept in its paint's `field`."""
+
+    def __init__(self, field: str) -> None:
+        self.field = field
+
+    @overload
+    def __get__(self, mob: None, owner: type) -> Self: ...
+    @overload
+    def __get__(self, mob: "Mobject", owner: type) -> T: ...
+    def __get__(self, mob: "Mobject | None", owner: type) -> "T | Self":
+        return self if mob is None else getattr(mob.paint, self.field)
+
+    def __set__(self, mob: "Mobject", value: T) -> None:
+        mob.paint = mob.paint.but(**{self.field: value})
+
+
+class PaintArray[G: np.ndarray, S: npt.ArrayLike = npt.ArrayLike]:
+    """A CE style attribute of a mobject that is an array (`mob.fill_rgbas`), kept in its
+    paint's `field`: read as the paint keeps it (G), set from S, copied as float values."""
 
     def __init__(self, field: str) -> None:
         self.field = field
@@ -1743,9 +1798,5 @@ class PaintAttribute[G, S = G]:
         return self if mob is None else getattr(mob.paint, self.field)
 
     def __set__(self, mob: "Mobject", value: S) -> None:
-        own = (
-            frozen(np.array(cast("npt.ArrayLike", value), dtype=float, copy=True))
-            if value is not None and (self.field in _SLOTS or self.field in _ARRAYS)
-            else value
-        )
-        mob.paint = mob.paint.but(**{self.field: own})
+        array = frozen(np.array(value, dtype=float, copy=True))
+        mob.paint = mob.paint.but(**{self.field: array})

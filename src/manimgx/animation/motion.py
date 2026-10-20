@@ -1329,12 +1329,7 @@ class ApplyFunction(Transform):
         super().__init__(mobject, keys=(None, self._apply), **kwargs)
 
     def _apply(self, copy: Mobject) -> Mobject:
-        target = self.function(copy)
-        if not isinstance(target, Mobject):
-            raise TypeError(
-                "Functions passed to ApplyFunction must return object of type Mobject"
-            )
-        return target
+        return self.function(copy)
 
 
 class ApplyMatrix(ApplyPointwiseFunction):

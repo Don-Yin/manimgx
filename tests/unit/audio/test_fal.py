@@ -4,8 +4,8 @@ audio.
 - A model is asked at its endpoint with the key, its text in the model's own input, the settings
   given (over what ManimGX sends unless told otherwise), and what the model is always sent; what
   it says is the audio at the URL fal answers with.
-- A model's settings are its own: another's are refused as the voice is made, and by a type
-  checker.
+- A model's settings and their values are its own: a type checker refuses another model's, and
+  a value the model doesn't take.
 - A voice is named by its model and its settings, however they were written, never by its key;
   without a key, it says where to get one.
 - A model's timing of its text times the words; timing that runs backwards, or none, leaves
@@ -67,17 +67,20 @@ def service(monkeypatch: pytest.MonkeyPatch) -> Service:
     return fake
 
 
-def written_otherwise(value: object) -> object:
+def written_otherwise(settings: dict[str, object]) -> dict[str, object]:
     """The same settings, every dict's keys in the other order."""
-    if isinstance(value, dict):
-        return {k: written_otherwise(v) for k, v in reversed(value.items())}
-    return value
+    return {
+        k: written_otherwise(v) if isinstance(v, dict) else v
+        for k, v in reversed(settings.items())
+    }
 
 
 models = st.sampled_from(sorted(fal._MODELS))
+# `Fal` for a model drawn at run time: no type checker reads the settings it is given
+untyped = cast("Callable[..., Fal]", Fal)
 
 
-def settings_of(model: str) -> st.SearchStrategy[dict[str, object]]:
+def settings_of(model: fal.Model) -> st.SearchStrategy[dict[str, object]]:
     """Any settings a model's schema allows."""
     return cast(
         "st.SearchStrategy[dict[str, object]]",
@@ -88,14 +91,14 @@ def settings_of(model: str) -> st.SearchStrategy[dict[str, object]]:
 class TestAsking:
     @given(model=models, data=st.data(), text=st.text(min_size=1))
     def test_a_model_is_asked_for_its_text(
-        self, model: str, data: st.DataObject, text: str
+        self, model: fal.Model, data: st.DataObject, text: str
     ) -> None:
         spec = fal._MODELS[model]
         settings = data.draw(settings_of(model), label="settings")
         fake = Service()
         with pytest.MonkeyPatch.context() as patch:
             patch.setattr(fal, "_fetch", fake)
-            speech = Fal(model, key="k", **settings)(text)  # type: ignore  (a model drawn at run time)
+            speech = untyped(model, key="k", **settings)(text)
         (url, body, headers), (audio_url, nothing, _) = fake.asked
         assert url == f"https://fal.run/{model}"
         assert headers == {"Authorization": "Key k"}
@@ -110,15 +113,13 @@ class TestAsking:
         assert speech.text == text
         assert speech.duration == pytest.approx(0.1)
 
-    def test_another_models_settings_are_refused(self) -> None:
-        untyped = cast("Callable[..., Fal]", Fal)  # as a caller no type checker reads
-        with pytest.raises(TypeError, match="takes"):
-            untyped("google/gemini-3.8-flash-tts", stability=0.5)
-
-    def test_a_type_checker_knows_each_models_values(self) -> None:
-        # the suppression is the test: `just check` fails if it goes unused
-        voice = Fal("google/gemini-3.8-flash-tts", voice="Nobody")  # type: ignore
-        assert voice.settings == {"voice": "Nobody"}  # fal refuses it as it speaks
+    def test_a_type_checker_knows_each_models_settings(self) -> None:
+        # the suppressions are the test: `just check` fails if one goes unused
+        others = Fal("google/gemini-3.8-flash-tts", stability=0.5)  # ty: ignore[invalid-argument-type]
+        nobody = Fal("google/gemini-3.8-flash-tts", voice="Nobody")  # ty: ignore[no-matching-overload]
+        # a voice keeps what it is given: its type is the check
+        assert others.settings == {"stability": 0.5}
+        assert nobody.settings == {"voice": "Nobody"}
 
     def test_without_a_key_it_says_where_to_get_one(
         self, monkeypatch: pytest.MonkeyPatch
@@ -135,20 +136,20 @@ class TestAsking:
 class TestNaming:
     @given(model=models, data=st.data(), key=st.text(min_size=1))
     def test_a_voice_is_named_by_its_model_and_settings_never_its_key(
-        self, model: str, data: st.DataObject, key: str
+        self, model: fal.Model, data: st.DataObject, key: str
     ) -> None:
         settings = data.draw(settings_of(model), label="settings")
         other = data.draw(settings_of(model), label="other settings")
-        voice = Fal(model, key=key, **settings)  # type: ignore  (a model drawn at run time)
-        again = Fal(model, **written_otherwise(settings))  # type: ignore  (the same)
+        voice = untyped(model, key=key, **settings)
+        again = untyped(model, **written_otherwise(settings))
         assert voices._identity(voice) == voices._identity(again)
         assert repr(voice) == repr(again)
         assert voice == again
         same = json.dumps(other, sort_keys=True) == json.dumps(settings, sort_keys=True)
-        named = voices._identity(Fal(model, **other))  # type: ignore  (the same)
+        named = voices._identity(untyped(model, **other))
         assert (named == voices._identity(voice)) == same
         for another in fal._MODELS.keys() - {model}:
-            assert voices._identity(Fal(another)) != voices._identity(voice)  # type: ignore
+            assert voices._identity(Fal(another)) != voices._identity(voice)
 
 
 class TestTiming:

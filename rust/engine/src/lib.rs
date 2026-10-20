@@ -2,7 +2,8 @@
 //! (`typeset`).
 //!
 //! It is Python's extension module (`python`), which also reads sound (`audio`): natively with
-//! the GPU, a film's video encoded by x264, its sound as AAC (`export`); in Pyodide without it,
+//! the GPU, on a thread of its own (`stage`), a film's video encoded by x264, its sound as AAC
+//! (`export`); in Pyodide without it,
 //! a scene's frames recorded as a take (`take`: its arrays coded against the ones they
 //! replace, `pack`). A take is played by the player (`player`: a projector of takes, `project`,
 //! on a clock, with a face, `chrome`, and a sound, `speaker`), the same on two screens: a window
@@ -34,6 +35,8 @@ mod python;
 mod speaker;
 #[cfg(feature = "render")]
 mod render;
+#[cfg(all(feature = "python", feature = "export"))]
+mod stage;
 mod take;
 #[cfg(feature = "player")]
 mod text;

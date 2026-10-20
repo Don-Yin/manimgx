@@ -14,12 +14,12 @@ import itertools
 import struct
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
 from manimgx import _engine
-from manimgx._engine import Recorder, digest
+from manimgx._engine import digest
 from manimgx.caches import forgets
 from manimgx.constants import CapStyleType, LineJointType
 from manimgx.drawing.geometry import (
@@ -515,13 +515,48 @@ Player: type[_engine.Player] | None = getattr(_engine, "Player", None)
 film is then recorded as a take, with a `Recorder`)."""
 
 
+class Store(Protocol):
+    """What a feed uploads to, by key: the GPU's player, or a recorder writing a take. It
+    takes each shape, row block, texture and environment once, grows paths, forgets what is
+    evicted, and tells the bytes it holds."""
+
+    def add_path(
+        self,
+        key: int,
+        points: bytes,
+        subpaths: bytes,
+        centroid_area: Sequence[float],
+        /,
+    ) -> None: ...
+    def add_points(self, key: int, vertices: bytes, /) -> None: ...
+    def add_mesh(
+        self,
+        key: int,
+        points: bytes,
+        uvs: bytes,
+        normals: bytes,
+        triangles: bytes,
+        outline: int,
+        block: int,
+        /,
+    ) -> None: ...
+    def add_rows(self, key: int, rows: bytes, /) -> None: ...
+    def add_texture(
+        self, key: int, width: int, height: int, rgba: bytes, /
+    ) -> None: ...
+    def add_environment(
+        self, id: int, width: int, height: int, rgbe: bytes, /
+    ) -> None: ...
+    def grow_path(self, key: int, points: bytes, closed: bool, /) -> None: ...
+    def evict(self, keys: Sequence[int], /) -> None: ...
+    def held(self) -> int: ...
+
+
 class Feeder:
     """Turns a frame's display list into player records, uploading what appears the first time:
     to the GPU's player, or to a recorder writing them into a take."""
 
-    def __init__(
-        self, width: int, height: int, player: "_engine.Player | Recorder"
-    ) -> None:
+    def __init__(self, width: int, height: int, player: Store) -> None:
         self.player = player
         self.serial = next(_FEEDERS)  # records kept on objects are this feeder's
         self.width, self.height = width, height
@@ -537,7 +572,6 @@ class Feeder:
         )  # the environment pictures the player has, by id
         # id(texture array) → (the array, its key): kept, so no other array takes its id
         self.textures: dict[int, tuple[np.ndarray, int]] = {}
-        self.texture_bytes: dict[int, int] = {}  # key → bytes, for the budget
         # id(read-only rows) → (rows, key)
         self.row_keys: dict[int, tuple[np.ndarray, int]] = {}
         # id(shape) → (shape, topology, uvs, steps, key, A): the mesh's upload inputs.
@@ -578,9 +612,9 @@ class Feeder:
         """Evict what no frame has shown for KEEP frames (frames mark what they show every MARK
         frames; the film holds back at most one frame). Memory pressure keeps only the latest
         frame and the records pinned by the caller, including every pending camera view.
-        The player also retains resources its queued export retries still need."""
-        stored, dead = self.player.stored()
-        pressed |= stored - dead + sum(self.texture_bytes.values()) > BUDGET
+        The player evicts in turn: after the frames sent before, and once its video's frames
+        in flight that may be drawn again are settled."""
+        pressed |= self.player.held() > BUDGET
         if self.frames - self.swept < SWEEP and not pressed:
             return
         for data in (*self.latest, *pinned):
@@ -594,18 +628,13 @@ class Feeder:
         # it is only forgotten
         resident = [k for k in stale if self.sizes.get(k, -1) != -1]
         if resident:
-            accepted = set(self.player.evict(resident))
-            blocked = set(resident) - accepted
-            stale = [key for key in stale if key not in blocked]
-        if not stale:
-            return
+            self.player.evict(resident)
         self.evictions += 1
         gone = set(stale)
         for key in stale:
             del self.last_used[key]
             self.sizes.pop(key, None)
             self.structures.pop(key, None)
-            self.texture_bytes.pop(key, None)
         # inputs of evicted resources are hashed again if shown again
         self.textures = {
             i: kept for i, kept in self.textures.items() if kept[1] not in gone
@@ -862,7 +891,6 @@ class Feeder:
             h, w = data.shape[:2]
             self.player.add_texture(key, w, h, data.tobytes())
             self.sizes[key] = 0
-            self.texture_bytes[key] = data.nbytes
         self.last_used[key] = self.frames
         if len(self.textures) > 1 << 8:
             self.textures.clear()
@@ -1077,7 +1105,7 @@ class Feeder:
             gradient_a[3] = p.stroke_width * 0.01
             if len(fill[0]) > 1:
                 head[2], head[4] = self.rows(fill[0]), self.rows(fill[1])
-        elif isinstance(mob, MeshMobject):
+        else:  # a mesh: the first dispatch drew nothing else
             steps = len(mob.triangles) // (1 if lattice is None else 2)
             params = [*p.window(steps), p.stroke_width * 0.01, 0.0]
             if (
@@ -1095,8 +1123,6 @@ class Feeder:
                 head[6] = self.camera_view(
                     p.texture, mob, camera, mobjects, width, height, cameras
                 )
-        else:
-            return None
         placed: list[float] = []
         for i, ((key, a), (matrix, _)) in enumerate(zip(keys, terms[:2], strict=False)):
             head[i] = key

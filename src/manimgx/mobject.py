@@ -88,6 +88,7 @@ from manimgx.drawing.paint import (
     ManimColor,
     Material,
     Paint,
+    PaintArray,
     PaintAttribute,
     ParsableManimColor,
     SimpleStyle,
@@ -642,6 +643,25 @@ def remove_list_redundancies[T](items: Sequence[T]) -> list[T]:
 
 def _family(roots: Iterable["Mobject"]) -> list["Mobject"]:
     """Preorder from these roots, each member once at its last occurrence."""
+    # Members held once (most families) are the preorder itself, made in one pass; a member
+    # met again sends the work to the walk that keeps last occurrences.
+    roots = list(roots)
+    preorder: list[Mobject] = []
+    met: set[int] = set()
+    pending = roots[::-1]
+    while pending:
+        item = pending.pop()
+        if id(item) in met:
+            return _family_of_repeats(roots)
+        met.add(id(item))
+        preorder.append(item)
+        if item.submobjects:
+            pending.extend(item.submobjects[::-1])
+    return preorder
+
+
+def _family_of_repeats(roots: list["Mobject"]) -> list["Mobject"]:
+    """`_family` of roots whose families share members, or repeat them."""
     # Right-to-left postorder is reversed preorder. Keep its first occurrences,
     # skipping already visited subtrees, then reverse to keep preorder's last ones.
     family: list[Mobject] = []
@@ -728,16 +748,16 @@ class Mobject:
     """How much the mobject's own colors lighten toward its `sheen_direction`, from -1
     to 1 (0: none; negative: they darken); see
     [set_sheen][manimgx.Mobject.set_sheen]."""
-    sheen_direction = PaintAttribute[Vector3D, Vector3DLike]("sheen_direction")
+    sheen_direction = PaintArray[Vector3D, Vector3DLike]("sheen_direction")
     """The direction the mobject's own colors lighten toward, which its color gradients
     run along too."""
-    fill_rgbas = PaintAttribute[RGBA_Array, npt.ArrayLike]("fill")
+    fill_rgbas = PaintArray[RGBA_Array]("fill")
     """The mobject's own fill colors, as rows of red, green, blue and opacity, from 0 to
     1: one row per gradient stop."""
-    stroke_rgbas = PaintAttribute[RGBA_Array, npt.ArrayLike]("stroke")
+    stroke_rgbas = PaintArray[RGBA_Array]("stroke")
     """The mobject's own stroke colors, as rows of red, green, blue and opacity, from 0
     to 1."""
-    background_stroke_rgbas = PaintAttribute[RGBA_Array, npt.ArrayLike]("background")
+    background_stroke_rgbas = PaintArray[RGBA_Array]("background")
     """The colors of the mobject's own background stroke (an outline drawn behind its
     fill), as rows of red, green, blue and opacity, from 0 to 1."""
     background_stroke_width = PaintAttribute[float]("background_width")
@@ -1154,12 +1174,7 @@ class Mobject:
     def _place(self, index: int | None, mobjects: Sequence["Mobject"]) -> Self:
         """The one way submobjects join: each a mobject that neither is this one nor holds
         it, once (where it last occurs), at `index` among the others (None: last)."""
-        for i, m in enumerate(mobjects):
-            if not isinstance(m, Mobject):
-                raise TypeError(
-                    f"Only Mobjects can be added to {type(self).__name__}, got"
-                    f" {type(m).__name__} at index {i}"
-                )
+        for m in mobjects:
             if m is self or (
                 m.submobjects and any(member is self for member in m.get_family())
             ):
@@ -1359,7 +1374,7 @@ class Mobject:
             if _per_frame(updater):
                 updater(self)
             else:
-                cast("Callable[[Self, float], object]", updater)(self, dt)
+                updater(self, dt)
         if recursive:
             for sub in self.submobjects:
                 sub.update(dt, recursive)
@@ -1422,7 +1437,7 @@ class Mobject:
         since = self._since
         start = since.get(updater, t)
         since[updater] = t
-        on = cast("clock.Clock | None", getattr(updater, "clock", None))
+        on: clock.Clock | None = getattr(updater, "clock", None)
         dt = float(t - start) if on is None else on.at(float(t)) - on.at(float(start))
         updater(self, dt)
 
@@ -1524,7 +1539,7 @@ class Mobject:
             if _per_frame(update_function):
                 update_function(self)
             else:
-                cast("Callable[[Self, float], object]", update_function)(self, 0)
+                update_function(self, 0)
         return self
 
     def remove_updater(self, update_function: Updater[Never]) -> Self:
@@ -1635,9 +1650,7 @@ class Mobject:
             mobject: The mobject whose updaters to take (its own, not its family's).
         """
         self.clear_updaters()
-        self.updaters.extend(
-            mobject.get_updaters()  # ty: ignore[invalid-argument-type]  # CE: another mobject's updaters, applied to this one
-        )
+        self.updaters.extend(mobject.updaters)
         self._stamp(clock.now, recursive=False)
         return self
 
@@ -4322,15 +4335,11 @@ class Mobject:
 def _members(items: Iterable[Mobject | Iterable[Mobject]]) -> list[Mobject]:
     """Mobjects and iterables of mobjects, flattened one level."""
     flat: list[Mobject] = []
-    for i, m in enumerate(items):
+    for m in items:
         if isinstance(m, Mobject):
             flat.append(m)
-        elif isinstance(m, Iterable):
-            flat.extend(m)
         else:
-            raise TypeError(
-                f"Only mobjects can be grouped, got {type(m).__name__} at index {i}"
-            )
+            flat.extend(m)
     return flat
 
 
@@ -4373,7 +4382,7 @@ class Group[T: Mobject = Mobject](Mobject):
     # Group, VGroup and PGroup are this one class
 
     # a Group[T] only ever adds T
-    submobjects: list[T]  # pyright: ignore[reportIncompatibleVariableOverride]
+    submobjects: list[T]
     """The group's members, in drawing order."""
 
     @overload  # `Group(a, b)`: members of any kinds
@@ -4390,7 +4399,7 @@ class Group[T: Mobject = Mobject](Mobject):
         super().__init__(**kwargs)
         Mobject.add(self, *_members(mobjects))
 
-    def add(  # pyright: ignore[reportIncompatibleMethodOverride]  # ty: ignore[invalid-method-override]  # a Group[T] adds T
+    def add(  # ty: ignore[invalid-method-override]  # a Group[T] adds T
         self, *mobjects: T | Iterable[T]
     ) -> Self:
         """Add members after the ones the group has: mobjects, or iterables of mobjects
@@ -4591,7 +4600,7 @@ class ValueTracker[V: (float, complex) = float](Mobject):
 
     def get_value(self) -> V:
         """The number the tracker holds."""
-        return float(self.points[0, 0])  # pyright: ignore[reportReturnType]  # V is float here
+        return float(self.points[0, 0])
 
     def set_value(self, value: V) -> Self:
         """Set the number the tracker holds; through
@@ -6127,9 +6136,7 @@ class VDict[T: Mobject = Mobject](Mobject):
     ) -> None: ...
     def __init__[Key: Hashable](
         self,
-        mapping_or_iterable: (
-            Mapping[Key, Mobject] | Iterable[tuple[Key, Mobject]]
-        ) = {},
+        mapping_or_iterable: Mapping[Key, T] | Iterable[tuple[Key, T]] = {},
         show_keys: bool = False,
         **kwargs: Unpack[Style],
     ) -> None:
@@ -6137,11 +6144,9 @@ class VDict[T: Mobject = Mobject](Mobject):
         self.show_keys = show_keys
         self.submob_dict: dict[Hashable, T] = {}
         """The members, by key."""
-        self.add(
-            mapping_or_iterable  # ty: ignore[invalid-argument-type]  # a VDict[T] is given T
-        )
+        self.add(mapping_or_iterable)
 
-    def add[Key: Hashable](  # pyright: ignore[reportIncompatibleMethodOverride]  # ty: ignore[invalid-method-override]  # CE's: by key
+    def add[Key: Hashable](  # ty: ignore[invalid-method-override]  # CE's: by key
         self, mapping_or_iterable: Mapping[Key, T] | Iterable[tuple[Key, T]]
     ) -> Self:
         """Add members by key, after the group's.
@@ -6158,7 +6163,7 @@ class VDict[T: Mobject = Mobject](Mobject):
             self.add_key_value_pair(key, value)
         return self
 
-    def remove(  # pyright: ignore[reportIncompatibleMethodOverride]  # ty: ignore[invalid-method-override]  # CE's: by key
+    def remove(  # ty: ignore[invalid-method-override]  # CE's: by key
         self, key: Hashable
     ) -> Self:
         """Remove the member with a key from the group.

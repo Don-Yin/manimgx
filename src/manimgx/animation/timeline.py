@@ -174,7 +174,8 @@ class Animation[M: Mobject = Mobject]:
     changes nothing: it holds its mobject in the scene for its run time.
 
     Args:
-        mobject: The mobject to animate; None for none, as a [`Wait`][manimgx.Wait] has.
+        mobject: The mobject to animate: a plain `Mobject()` for an animation that
+            changes none, as a [`Wait`][manimgx.Wait] does.
         **options: [Animation options][manimgx.animation.timeline.AnimationOptions].
 
     Examples:
@@ -211,11 +212,7 @@ class Animation[M: Mobject = Mobject]:
         animation._call = args, kwargs
         return animation
 
-    def __init__(
-        self,
-        mobject: M | None,
-        **options: Unpack[AnimationOptions],
-    ) -> None:
+    def __init__(self, mobject: M, **options: Unpack[AnimationOptions]) -> None:
         o = animation_defaults(type(self)) | options
         self.run_time = o.get("run_time", 1.0)
         self.rate_func = o.get("rate_func", smooth)
@@ -229,9 +226,7 @@ class Animation[M: Mobject = Mobject]:
         self.frames: list[Mobject] = []  # the keyframes, as derived (`derive`)
         self._model: M | None = None
         self._scene: Scene | None = None  # the scene it plays in (`_setup_scene`)
-        self._mobject: M = (
-            mobject if mobject is not None else Mobject()  # pyright: ignore[reportAttributeAccessIssue]  # ty: ignore[invalid-assignment]  # none: an Animation[Mobject]
-        )
+        self._mobject = mobject
 
     # read-only, so an animation of a Circle is an animation of a Mobject (M is covariant)
     @property
@@ -738,7 +733,7 @@ class Wait(Animation[Mobject]):
         self.duration = run_time
         self.stop_condition = stop_condition
         self.is_static_wait = frozen_frame
-        super().__init__(None, run_time=run_time, **kwargs)
+        super().__init__(Mobject(), run_time=run_time, **kwargs)
 
     def begin(self) -> None: ...
     def finish(self) -> None: ...

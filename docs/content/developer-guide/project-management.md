@@ -181,9 +181,9 @@ rules follow:
   in ManimGX and in a user's scene alike. [`Style`][manimgx.drawing.paint.Style], in
   [`drawing/paint.py`](https://github.com/academa-labs/manimgx/blob/main/src/manimgx/drawing/paint.py),
   is the style keywords; [`Polygon`][manimgx.Polygon] takes `**kwargs: Unpack[Style]`.
-- **Only live suppressions, in ty's form.** ty honors `# ty: ignore[rule]` and a bare
-  `# type: ignore`, not `# type: ignore[code]`. A suppression that suppresses nothing is an
-  error (`[tool.ty]` makes it one), so one that a fix has made useless fails the check.
+- **Only live suppressions, in ty's form.** A suppression is `# ty: ignore[rule]`, only where
+  no type can say it. `[tool.ty]` makes ty read no other form, and makes a suppression that
+  suppresses nothing an error, so one that a fix has made useless fails the check.
   ruff's formatter does not count a trailing suppression comment in a line's width, but it
   splits a line too long without one and moves the comment to the last line, so run
   `just check` after `just format`.

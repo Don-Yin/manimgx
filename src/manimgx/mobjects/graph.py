@@ -111,9 +111,9 @@ def _partite_layout(
     partition_count = len(partitions)
     for i in range(partition_count):
         for v in partitions[i]:
-            if nx_graph.nodes[v] is None:
+            if v not in nx_graph:
                 raise ValueError(
-                    "The partition must contain arrays of vertices in the graph"
+                    f"{v!r}, in partition {i}, is not a vertex of the graph"
                 )
             nx_graph.nodes[v]["subset"] = i
     for v in nx_graph.nodes:
@@ -494,9 +494,12 @@ def _split[K: Hashable](
     shared: Config = {
         k: v for k, v in given.items() if isinstance(k, str) and k not in names
     }
-    return shared, {
-        k: dict(cast("Mapping[str, object]", given[k])) for k in names if k in given
-    }
+    own: dict[K, Config] = {}
+    for k in names & given.keys():
+        if not isinstance(keywords := given[k], Mapping):
+            raise TypeError(f"{k!r}'s own keywords are not a mapping: {keywords!r}")
+        own[k] = dict(keywords)
+    return shared, own
 
 
 class GenericGraph[V: Hashable = Hashable](VMobject):
@@ -630,7 +633,7 @@ class GenericGraph[V: Hashable = Hashable](VMobject):
             for u, v in edges
         }
 
-    def __getitem__(  # pyright: ignore[reportIncompatibleMethodOverride]  # ty: ignore[invalid-method-override]  # CE: a graph is indexed by vertex and edge, not position
+    def __getitem__(  # ty: ignore[invalid-method-override]  # CE: a graph is indexed by vertex and edge, not position
         self, k: V | Edge[V]
     ) -> Mobject:
         if k in self.vertices:
@@ -1119,10 +1122,9 @@ class DiGraph[V: Hashable = Hashable](GenericGraph[V]):
 
     def _make_edge(self, edge_type: Maker, u: V, v: V, config_: Config) -> Mobject:
         style = config_.copy()
-        tips = cast(
-            "TipConfig",
-            style.pop("tip_config", self.default_edge_config.get("tip_config", {})),
-        )
+        tips = style.pop("tip_config", self.default_edge_config.get("tip_config", {}))
+        if not isinstance(tips, Mapping):
+            raise TypeError(f"an edge's tip_config is not a mapping: {tips!r}")
         edge = edge_type(start=self[u], end=self[v], z_index=-1, **style)
         if isinstance(edge, Line):
             edge.add_tip(**tips)

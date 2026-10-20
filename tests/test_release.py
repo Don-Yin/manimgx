@@ -20,6 +20,8 @@ import pytest
 import yaml
 from scripts.release import create_executable, linux_sources, publish_npm, smoke_test
 
+import manimgx as m
+
 ROOT = Path(__file__).parents[1]
 JOBS = yaml.safe_load(
     (ROOT / ".github/workflows/release.yaml").read_text(encoding="utf-8")
@@ -480,8 +482,11 @@ def test_release_smoke_records_decoded_audio_and_a_complete_versioned_take(
     relocated = runpy.run_path(str(script))
     scene: dict[str, object] = {}
     exec(relocated["scene_source"](), scene)
+    smoke = scene["Smoke"]
+    assert isinstance(smoke, type)
+    assert issubclass(smoke, m.Scene)
     chunks: list[bytes] = []
-    film = scene["Smoke"]().render(take=chunks.append)  # ty: ignore[call-non-callable]
+    film = smoke().render(take=chunks.append)
     take = b"".join(chunks)
     smoke_test.validate_take(take, film.frame_count)
     # A nonempty/truncated/failed take used to pass the artifact smoke gate.

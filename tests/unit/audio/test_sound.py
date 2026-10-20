@@ -397,7 +397,7 @@ class Begun(m.Animation):
     """An animation that notes the instant it begins."""
 
     def __init__(self, log: list[Fraction], run_time: float = 1.0) -> None:
-        super().__init__(None, run_time=run_time)
+        super().__init__(m.Mobject(), run_time=run_time)
         self.log = log
 
     def begin(self) -> None:

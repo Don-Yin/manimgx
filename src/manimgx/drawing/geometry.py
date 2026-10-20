@@ -19,7 +19,7 @@ import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from types import ModuleType
-from typing import TYPE_CHECKING, Final, Literal, NamedTuple
+from typing import TYPE_CHECKING, Final, Literal, NamedTuple, overload
 from warnings import deprecated
 
 import numpy as np
@@ -402,7 +402,7 @@ def find_intersection(
     return result
 
 
-def midpoint(p1: Point3D, p2: Point3D) -> Point3D:
+def midpoint(p1: Point3DLike, p2: Point3DLike) -> Point3D:
     """The point halfway between two points.
 
     Args:
@@ -523,7 +523,7 @@ def cross2d(a: np.ndarray, b: np.ndarray) -> npt.NDArray[np.float64] | float:
 
 
 @deprecated("use numpy: np.mean(points, axis=0)", category=None)
-def center_of_mass(points: Point3D_Array) -> Point3D:
+def center_of_mass(points: Point3DLike_Array) -> Point3D:
     """The average of points.
 
     Returns:
@@ -1204,7 +1204,19 @@ class QuickHull:
                 break
 
 
-def interpolate[T](start: T, end: T, alpha: float | np.ndarray) -> T:
+@overload
+def interpolate(start: float, end: float, alpha: float) -> float: ...
+@overload
+def interpolate(start: complex, end: complex, alpha: float) -> complex: ...
+@overload
+def interpolate(start: float, end: float, alpha: np.ndarray) -> np.ndarray: ...
+@overload
+def interpolate(
+    start: np.ndarray, end: np.ndarray, alpha: float | np.ndarray
+) -> np.ndarray: ...
+def interpolate(
+    start: complex | np.ndarray, end: complex | np.ndarray, alpha: float | np.ndarray
+) -> complex | np.ndarray:
     """The value a fraction of the way from one value to another: (1 − alpha)·start +
     alpha·end.
 
@@ -1217,7 +1229,7 @@ def interpolate[T](start: T, end: T, alpha: float | np.ndarray) -> T:
     Returns:
         The value between.
     """
-    return (1 - alpha) * start + alpha * end  # pyright: ignore[reportOperatorIssue]  # ty: ignore[unsupported-operator]  # T: numbers, arrays
+    return (1 - alpha) * start + alpha * end
 
 
 def integer_interpolate(start: float, end: float, alpha: float) -> tuple[int, float]:
@@ -1260,18 +1272,24 @@ def inverse_interpolate(start: float, end: float, value: float) -> float:
 _NPPCC = 4
 
 
-def sample(function: Callable[..., object], *args: np.ndarray) -> np.ndarray:
+def sample(
+    function: Callable[..., object], *args: np.ndarray, checked: bool = True
+) -> np.ndarray:
     """Evaluate a function at every point of a grid of arguments.
 
     `args` are arrays of one shape, one per argument of `function`. The function is
     called once on the whole arrays, as most numeric functions allow, and checked
     against single calls at the first, middle and last points; a function written for
     one value at a time (`math.cos`, `if t < 0`) raises or differs there, and is then
-    called once per point.
+    called once per point. A value given as its components (`(t, t**2, 0)`) takes a
+    component that is one number across the grid.
 
     Args:
         function: The function, from the arguments to a value.
         *args: The arguments' values: arrays of one shape.
+        checked: Whether the whole arrays' values are checked against single calls;
+            unchecked, a function that takes arrays is trusted to give what single
+            calls would.
 
     Returns:
         The values: an array of the arguments' shape, followed by a value's.
@@ -1279,12 +1297,15 @@ def sample(function: Callable[..., object], *args: np.ndarray) -> np.ndarray:
     shape, n = args[0].shape, args[0].size
     flat = [a.ravel() for a in args]
     try:
-        out = np.asarray(function(*args), dtype=float)
+        value = function(*args)
+        if isinstance(value, (tuple, list)):  # its components: a number taken across
+            value = np.broadcast_arrays(*(np.asarray(c, dtype=float) for c in value))
+        out = np.asarray(value, dtype=float)
         k = len(shape)
         if out.shape[:k] != shape and out.shape[-k:] == shape:  # values first
             out = np.moveaxis(out, range(out.ndim - k, out.ndim), range(k))
         values = out.reshape(n, -1)
-        for i in {0, n // 2, n - 1}:
+        for i in {0, n // 2, n - 1} if checked else ():
             one = np.asarray(function(*(float(f[i]) for f in flat)), dtype=float)
             if not np.allclose(values[i], one.ravel(), rtol=1e-9, atol=1e-12):
                 raise ValueError(i)
@@ -1344,7 +1365,7 @@ def _to_path(points: Point3D_Array, tolerance: float) -> SkiaPath:
     return path
 
 
-def bezier(points: Point3D_Array) -> Callable[[float], Point3D]:
+def bezier(points: Point3DLike_Array) -> Callable[[float], Point3D]:
     """A cubic Bézier curve as a function: from its first control point at 0 to its last
     at 1.
 
@@ -1363,7 +1384,9 @@ def bezier(points: Point3D_Array) -> Callable[[float], Point3D]:
     return cubic
 
 
-def partial_bezier_points(points: Point3D_Array, a: float, b: float) -> Point3D_Array:
+def partial_bezier_points(
+    points: Point3DLike_Array, a: float, b: float
+) -> Point3D_Array:
     """The control points of part of a cubic Bézier curve, from its parameter `a` to
     `b`.
 
@@ -1434,7 +1457,9 @@ def _subdivision_matrix(n: int | np.integer) -> np.ndarray:
     return _SUBDIVISION.keep(n, m)
 
 
-def subdivide_bezier(points: Point3D_Array, n_divisions: int) -> Point3D_Array:
+def subdivide_bezier(
+    points: Point3DLike_Array, n_divisions: int | np.integer
+) -> Point3D_Array:
     """Split a cubic Bézier curve into curves over equal stretches of its parameter.
 
     Args:
@@ -1450,7 +1475,7 @@ def subdivide_bezier(points: Point3D_Array, n_divisions: int) -> Point3D_Array:
     return _subdivision_matrix(n_divisions) @ points
 
 
-def bezier_remap(tuples: np.ndarray, new_count: int) -> np.ndarray:
+def bezier_remap(tuples: npt.ArrayLike, new_count: int) -> np.ndarray:
     """Split cubic Bézier curves into more, their shape unchanged.
 
     Each curve is split over equal stretches of its parameter, the new curves spread

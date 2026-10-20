@@ -1299,7 +1299,7 @@ class SingleStringMathTex(Typst):
         tex_environment: str | None = "align*",
         **kwargs: Unpack[TypstOptions],
     ) -> None:
-        self.tex_string = tex_string = str(tex_string)
+        self.tex_string = tex_string
         """The LaTeX the formula was typeset from."""
         self.tex_environment = tex_environment
         body = (

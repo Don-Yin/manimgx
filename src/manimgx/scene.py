@@ -926,7 +926,7 @@ class Scene:
                 and kind.interpolate_keyframes is Transform.interpolate_keyframes
                 and kind.hidden is Animation.hidden  # (it hides nothing)
                 and not _updating(node.mobject)  # (no updaters act while it plays)
-                and not node.moving_target()
+                and node.moving_target() is None
             ):
                 return None
             if closes.any() and (  # it leaves before the play ends: as a remover

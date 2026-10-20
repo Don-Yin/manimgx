@@ -90,7 +90,7 @@ class Sound(Animation[Mobject]):
         self.source = source
         self.rate = rate
         self._edit = _Edit()
-        super().__init__(None)
+        super().__init__(Mobject())
 
     # ── edits: each makes a new sound ─────────────────────────────────────────
     def _but(self, **changes: float | None) -> Self:

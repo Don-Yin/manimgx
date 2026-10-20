@@ -11,7 +11,7 @@ import os
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from fractions import Fraction
-from typing import TYPE_CHECKING, Final, Literal, cast, get_args
+from typing import TYPE_CHECKING, Final, Literal, get_args
 from warnings import deprecated
 
 from manimgx import _engine
@@ -44,9 +44,7 @@ X264Preset = Literal[
 ]
 """The x264 presets, from fastest to slowest."""
 
-DEFAULT_ENCODER_PRESET: Final[X264Preset] = cast(
-    X264Preset, _engine.DEFAULT_ENCODER_PRESET
-)
+DEFAULT_ENCODER_PRESET: Final[X264Preset] = _engine.DEFAULT_ENCODER_PRESET
 """The native encoder's default preset, shared by Python and the command line."""
 DEFAULT_ENCODER_CRF: Final[float] = _engine.DEFAULT_ENCODER_CRF
 """The native encoder's default constant rate factor."""
@@ -239,7 +237,7 @@ class Film:
         preset: The x264 preset the video is encoded with: faster presets make larger
             files.
         crf: The video's quality, as x264's constant rate factor, from 0 to 51:
-            lower is better, the default value is 18.
+            lower is better, the default value is 23.
     """
 
     def __init__(

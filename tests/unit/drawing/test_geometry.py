@@ -116,7 +116,7 @@ class TestCurve:
         # numpy's integers, as numpy code passes them
         count = np.int32(n) if numpy else n
         with np.errstate(over="raise", invalid="raise"):
-            split = g.subdivide_bezier(points, count)  # ty: ignore[invalid-argument-type]
+            split = g.subdivide_bezier(points, count)
         pieces = split.reshape(n, 4, 3)
         close(
             oracles.bezier_points(pieces, np.array([s]))[:, 0],

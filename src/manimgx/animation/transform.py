@@ -8,7 +8,7 @@ from __future__ import annotations
 import functools
 import inspect
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Never, Protocol, Self, Unpack, cast, overload
+from typing import TYPE_CHECKING, Literal, Never, Protocol, Self, Unpack, overload
 from warnings import deprecated
 
 import numpy as np
@@ -35,7 +35,6 @@ from manimgx.drawing.geometry import (
 from manimgx.mobject import Group, Mobject, VMobject, _animate_plays
 from manimgx.typing import (
     PathFunc,
-    Point3D,
     Point3DLike,
     Point3DLike_Array,
     Vector3DLike,
@@ -243,11 +242,11 @@ class Transform[M: Mobject = Mobject](Animation[M]):
 
     # each leaf moves between its keyframes along `path_func`: from the object to a target
     # of its own, or between states a preset derives (`keys`)
-    _moving: bool | None = None  # `moving_target`, once decided
+    _moving: Mobject | Literal[False] | None = None  # `moving_target`, once decided
 
     def __init__(
         self,
-        mobject: M | None,
+        mobject: M,
         target_mobject: Mobject | None = None,
         path_func: PathFunc | None = None,
         path_arc: float = 0,
@@ -309,8 +308,8 @@ class Transform[M: Mobject = Mobject](Animation[M]):
         # from now, its updaters live from when the animation begins to run them
         self._moving = None
         super().begin()
-        if self.moving_target():
-            cast("Mobject", self.keys[-1])._stamp(clock.now)
+        if (target := self.moving_target()) is not None:
+            target._stamp(clock.now)
 
     def take(self) -> None:
         # take the object; in a play, join the tweens driving its leaves
@@ -346,18 +345,20 @@ class Transform[M: Mobject = Mobject](Animation[M]):
         return steps, np.linalg.inv(carried((step, 1.0) for step in steps))
 
     @deprecated("Manim CE's machinery: ManimGX calls it itself", category=None)
-    def moving_target(self) -> bool:
-        """Whether the target moves while the animation plays.
+    def moving_target(self) -> Mobject | None:
+        """The target, if it moves while the animation plays; None if it doesn't.
 
-        It does when it is a mobject of its own with updaters that the scene does not
+        It moves when it is a mobject of its own with updaters that the scene does not
         run: the animation runs them (`advance`), and the keyframes follow it. Decided
         once, when first asked.
         """
         # decided once: not a walk of the scene per animation, nor of the target per
         # frame
-        if self._moving is None:
+        moving = self._moving
+        if moving is None:
             target = self.keys[-1]
-            self._moving = (
+            moving = False
+            if (
                 isinstance(target, Mobject)
                 and _updating(target)
                 and (
@@ -366,19 +367,21 @@ class Transform[M: Mobject = Mobject](Animation[M]):
                         target is m for m in self._scene.get_mobject_family_members()
                     )
                 )
-            )
-        return self._moving
+            ):
+                moving = target
+            self._moving = moving
+        return None if moving is False else moving
 
     def advance(self, t: Fraction) -> None:
         # the object's updaters, brought to scene time `t` on its model, a moving target's
         # too; then the keyframes follow
         moving = self.moving_target()
-        if self.model is None and not moving:
+        if self.model is None and moving is None:
             return
         if self.model is not None:
             self.model.advance(t)
-        if moving:
-            cast("Mobject", self.keys[-1]).advance(t)
+        if moving is not None:
+            moving.advance(t)
         self.rederive()
 
     def rederive(self) -> None:
@@ -1016,7 +1019,7 @@ def _turn(
         bound = inspect.signature(func).bind(None, *item.args, **item.kwargs)
         bound.apply_defaults()
         given = bound.arguments
-        angle = PI if name == "flip" else float(cast("float", given["angle"]))
+        angle = PI if name == "flip" else float(given["angle"])
         axis = np.asarray(given["axis"], dtype=np.float64)
     except (TypeError, KeyError, ValueError):
         return None
@@ -1026,7 +1029,7 @@ def _turn(
     def pivot(mob: Mobject) -> Floats:
         if point is not None:
             return np.asarray(point, dtype=np.float64)
-        return mob.get_critical_point(ORIGIN if edge is None else cast("Point3D", edge))
+        return mob.get_critical_point(ORIGIN if edge is None else edge)
 
     return angle, axis, pivot
 

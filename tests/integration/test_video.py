@@ -221,49 +221,54 @@ def test_eviction_preserves_queued_transparency_retries(
 
 
 @pytest.mark.parametrize("auxiliary", [False, True])
-def test_retry_resources_become_evictable_after_their_last_pending_frame(
+def test_evicting_what_a_frame_in_flight_draws_waits_for_its_retries(
     tmp_path: Path, auxiliary: bool
 ) -> None:
-    player = Player(*SIZE)
-    feeder = Feeder(*SIZE, player)
-    camera = m.Camera(three_d=True)
-    cloud = m.PMobject(stroke_width=4).add_points(
-        np.random.default_rng(7).uniform(-3, 3, (20, 3)),
-        rgbas=np.random.default_rng(8).random((20, 4)),
-    )
-    image = m.ImageMobject(np.full((2, 2, 4), 128, np.uint8))
-    view, records, _ = feeder.frame(camera, [cloud, image])
-    keys = sorted(
-        {
-            int(row[name])
-            for row in np.frombuffer(records, feed.RECORD)
-            for name in (*feed.KEYS, "texture")
-            if row[name]
-        }
-    )
-    empty_view, empty_records, _ = feeder.frame(camera, [])
-    unused = feeder.texture(np.zeros((2, 2, 4), np.uint8))
-    player.begin_export(str(tmp_path / "pending.mp4"), 30)
-    for _ in range(2):
-        cloud.shift(0.1 * m.RIGHT)
-        view, records, _ = feeder.frame(camera, [cloud, image])
+    def film(path: Path, evicting: bool) -> None:
+        player = Player(*SIZE)
+        feeder = Feeder(*SIZE, player)
+        camera = m.Camera(three_d=True)
+        # see-through layers overflow the first frame's lists: it is drawn again later, from
+        # what it draws, the cloud's and the image's uploads among it
+        layers = [
+            m.MeshMobject(
+                np.array([[-8, -5, z], [8, -5, z], [8, 5, z], [-8, 5, z]]),
+                np.array([[0, 1, 2], [0, 2, 3]]),
+                color=m.BLUE if i % 2 else m.RED,
+                fill_opacity=0.2,
+            )
+            for i, z in enumerate(np.linspace(-0.2, 0.2, 12))
+        ]
+        cloud = m.PMobject(stroke_width=4).add_points(
+            np.random.default_rng(7).uniform(-3, 3, (20, 3)),
+            rgbas=np.random.default_rng(8).random((20, 4)),
+        )
+        image = m.ImageMobject(np.full((2, 2, 4), 128, np.uint8))
+        player.begin_export(str(path), 30)
+        view, records, _ = feeder.frame(camera, [*layers, cloud, image])
         if auxiliary:
+            empty_view, empty_records, _ = feeder.frame(camera, [])
             player.push(
                 empty_view, empty_records, cameras=[(123, *SIZE, view, records)]
             )
         else:
             player.push(view, records)
-        # Empty and repeated requests must not discard dependencies cached on the first.
-        assert player.evict([]) == []
-        assert player.evict(keys[:1]) == []
-        assert player.evict([*keys, unused]) == [unused]
-    # The ring holds six frames. After five more pushes only the second use is pending.
-    for _ in range(5):
-        player.push(empty_view, empty_records)
-    assert player.evict(keys) == []
-    player.push(empty_view, empty_records)
-    assert player.evict(keys) == keys
-    player.end_export()
+        if evicting:
+            player.evict(
+                [
+                    key
+                    for row in np.frombuffer(records, feed.RECORD)
+                    for key in (int(row[name]) for name in (*feed.KEYS, "texture"))
+                    if key
+                ]
+            )
+        player.push(*feeder.frame(camera, [m.Square(fill_opacity=1)])[:2])
+        player.end_export()
+
+    reference, evicted = tmp_path / "reference.mp4", tmp_path / "evicted.mp4"
+    film(reference, False)
+    film(evicted, True)
+    assert evicted.read_bytes() == reference.read_bytes()
 
 
 @pytest.mark.config(frame_rate=10)

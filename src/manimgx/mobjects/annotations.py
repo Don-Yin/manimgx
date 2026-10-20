@@ -69,7 +69,6 @@ from manimgx.mobjects.text import (
     MathTexOptions,
     Tex,
     Text,
-    Typst,
     TypstOptions,
 )
 from manimgx.typing import ManimTextLabel
@@ -143,10 +142,6 @@ class SurroundingRectangle(RoundedRectangle):
         corner_radius: float = 0.0,
         **kwargs: Unpack[Style],
     ) -> None:
-        if not all(isinstance(mob, Mobject) for mob in mobjects):
-            raise TypeError(
-                "Expected all inputs for parameter mobjects to be a Mobjects"
-            )
         if isinstance(buff, tuple):
             buff_x = buff[0]
             buff_y = buff[1]
@@ -352,12 +347,8 @@ class Label(VGroup):
         if isinstance(label, str):
             self.rendered_label: ManimTextLabel = MathTex(label, **label_style)
             """The label's text or math, a submobject."""
-        elif isinstance(label, Typst):
-            self.rendered_label = label
         else:
-            raise TypeError(
-                "Unsupported label type. Must be MathTex, Tex, Text or Typst."
-            )
+            self.rendered_label = label
         self.background_rect = BackgroundRectangle(self.rendered_label, **box_style)
         """The rectangle behind the label, a submobject."""
         self.frame = SurroundingRectangle(self.rendered_label, **frame_style)
@@ -725,7 +716,7 @@ class Brace(VMobjectFromSVGPath):
         """
         return self.points[28]
 
-    def get_direction(  # pyright: ignore[reportIncompatibleMethodOverride]  # ty: ignore[invalid-method-override]  # CE's: a brace's direction is a vector, a path's a winding
+    def get_direction(  # ty: ignore[invalid-method-override]  # CE's: a brace's direction is a vector, a path's a winding
         self,
     ) -> Vector3D:
         """The direction the brace points to: from its center to its tip.

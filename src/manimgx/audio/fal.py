@@ -12,9 +12,8 @@ the models below:
 | `fal-ai/qwen-3-tts/text-to-speech/1.7b` | [`Qwen`][manimgx.audio.fal.Qwen] | estimated |
 
 A model takes settings of its own, typed per model: a type checker knows which settings a
-model takes and which values (its voices, say), and `Fal` checks their names as it is made.
-The key is `FAL_KEY`'s (fal's dashboard gives one), or `key=`; it never names the voice in the
-cache.
+model takes and which values (its voices, say). The key is `FAL_KEY`'s (fal's dashboard
+gives one), or `key=`; it never names the voice in the cache.
 """
 
 import json
@@ -428,7 +427,7 @@ class _Spec:
     fixed: tuple[tuple[str, object], ...] = ()
 
 
-_MODELS: dict[str, _Spec] = {
+_MODELS: dict[Model, _Spec] = {
     "fal-ai/elevenlabs/tts/eleven-v3": _Spec(
         "text", ElevenV3, fixed=(("timestamps", True),)
     ),
@@ -525,14 +524,6 @@ class Fal:
         key: str | None = None,
         **settings: object,
     ) -> None:
-        spec = _MODELS.get(model)
-        if spec is None:
-            raise ValueError(f"fal: no model {model!r} here: {', '.join(_MODELS)}")
-        known = spec.settings.__annotations__
-        if unknown := sorted(settings.keys() - known.keys()):
-            raise TypeError(
-                f"{model} takes {', '.join(known)}; not {', '.join(unknown)}"
-            )
         object.__setattr__(self, "model", model)
         object.__setattr__(
             self, "settings", {k: _ordered(v) for k, v in sorted(settings.items())}
