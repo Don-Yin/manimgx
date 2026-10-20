@@ -31,6 +31,11 @@ updates:
     groups:
       rust:
         patterns: ["*"]
+    # bincode 3.0.0 is no release, but one line, compile_error!, published when its maintainers
+    # stopped, so bincode stays on 1.3
+    ignore:
+      - dependency-name: bincode
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: pre-commit
     directory: /
