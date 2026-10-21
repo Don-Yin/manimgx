@@ -41,6 +41,7 @@ The notable changes to ManimGX, release by release. The format follows
 
 - Redraw a shape that empties with `always_redraw` without a RecursionError, and keep a mobject's updaters off the member its points move into when a transform aligns it, so a relative updater such as `always_shift` no longer runs twice on them ([#32](https://github.com/academa-labs/manimgx/issues/32)).
 - Measure a text's size in `inspect` and `render` at 1080p, which is 1080 px on a video's short side, so a tall video (1080x1920) no longer reports readable text as small ([#37](https://github.com/academa-labs/manimgx/issues/37)).
+- Make the folder a video or a storyboard is written in when it is missing (`render -o new/out.mp4`, `inspect -o new/sheet.png` and `Scene.render`), instead of failing with "No such file or directory" ([#34](https://github.com/academa-labs/manimgx/issues/34)).
 - Keep resources needed by queued video frames until their transparency retries finish, fixing render failures during cache cleanup ([#16](https://github.com/academa-labs/manimgx/issues/16)).
 - Draw a storyboard picture without dropping the frame the film holds back, fixing `manimgx render` failures ("unknown shape") under memory pressure.
 - Draw a vectorized curve whose function gives a component as one number (`use_vectorized` with `lambda t: (t, t**2, 0)`), which failed with numpy's inhomogeneous-shape error.

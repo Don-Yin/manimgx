@@ -644,7 +644,7 @@ class Scene:
         Args:
             video: The MP4 file to write, if any, at the size and frame rate of
                 [`config`][manimgx.config.config] (a whole number of frames a second,
-                and an even width and height).
+                and an even width and height); its folder is made if it is missing.
             preset: The x264 encoding preset; faster presets make larger files.
             crf: The x264 constant rate factor, from 0 to 51; lower values give
                 higher quality.

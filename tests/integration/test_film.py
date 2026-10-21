@@ -42,6 +42,13 @@ def test_a_cut_at_the_last_frame_keeps_the_film(tmp_path: Path) -> None:
     assert (tmp_path / "held.mp4").stat().st_size > 0
 
 
+def test_a_video_makes_the_folder_it_is_written_in(tmp_path: Path) -> None:
+    video = tmp_path / "new" / "folder" / "held.mp4"
+    Held().render(video)
+    assert video.stat().st_size > 0
+    assert sorted(p.name for p in video.parent.iterdir()) == ["held.mp4"]
+
+
 def test_an_error_at_the_last_frame_abandons_the_video(tmp_path: Path) -> None:
     _, sink = at_the_last(ValueError("the sink failed"))
     with pytest.raises(ValueError, match="the sink failed"):

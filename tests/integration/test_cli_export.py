@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 import typer
 from PIL import Image
+from typer.testing import CliRunner
 
-from manimgx.cli import export
+from manimgx.cli import app, export
 from manimgx.cli.export import inspect
 from manimgx.cli.storyboard import Sheets
 
@@ -82,3 +83,33 @@ def test_a_scene_error_finishes_its_storyboard_writer(
     finally:
         sheets._writer.shutdown()
         sys.modules.pop(source.stem, None)
+
+
+def test_an_output_in_a_missing_folder_is_written_there(tmp_path: Path) -> None:
+    """`-o` names where a command writes, and the folder is made as its files are written:
+    the video, the storyboard and the page, each in a folder that does not exist yet."""
+    source = tmp_path / "scene.py"
+    source.write_text(
+        "import manimgx as m\n"
+        "m.config.pixel_width = m.config.pixel_height = 16\n"
+        "m.config.frame_rate = 10\n"
+        "class Only(m.Scene):\n"
+        "    def construct(self):\n"
+        "        self.wait(0.1)\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    video = tmp_path / "new" / "folder" / "out.mp4"
+    result = runner.invoke(app, ["render", str(source), "-o", str(video)])
+    assert result.exit_code == 0, result.output
+    assert video.exists()
+    assert video.with_name("out.storyboard.png").exists()
+    storyboard = tmp_path / "sheets" / "sheet.png"
+    result = runner.invoke(app, ["inspect", str(source), "-o", str(storyboard)])
+    assert result.exit_code == 0, result.output
+    assert storyboard.exists()
+    deck = tmp_path / "deck" / "talk.mp4"
+    result = runner.invoke(app, ["present", str(source), "-o", str(deck), "--no-open"])
+    assert result.exit_code == 0, result.output
+    assert deck.exists()
+    assert deck.with_suffix(".html").exists()

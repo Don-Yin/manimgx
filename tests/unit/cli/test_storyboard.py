@@ -40,11 +40,20 @@ def test_a_sound_is_named_by_its_length() -> None:
     )
 
 
+def test_sheets_make_the_folder_they_are_written_in(tmp_path: Path) -> None:
+    sheet = tmp_path / "new" / "folder" / "storyboard.png"
+    sheets = Sheets(sheet)
+    sheets.add("a frame", Image.new("RGB", (2, 2)))
+    assert sheets.close() == [sheet]
+    assert sheet.is_file()
+
+
 def test_a_failed_sheet_write_closes_the_writer(tmp_path: Path) -> None:
-    sheets = Sheets(tmp_path / "missing" / "storyboard.png")
+    (tmp_path / "storyboard.png").mkdir()  # a folder where the sheet goes
+    sheets = Sheets(tmp_path / "storyboard.png")
     sheets.add("a frame", Image.new("RGB", (2, 2)))
     try:
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(OSError, match=r"storyboard\.png"):
             sheets.close()
         with pytest.raises(RuntimeError, match="after shutdown"):
             sheets._writer.submit(lambda: None)

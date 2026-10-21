@@ -81,6 +81,7 @@ class Sheets:
         out = self.path.with_name(
             self.path.name if n == 1 else f"{self.path.stem}-{n}{self.path.suffix}"
         )
+        out.parent.mkdir(parents=True, exist_ok=True)
         self._writes.append(
             self._writer.submit(_sheet(self._tiles).save, out, compress_level=3)
         )

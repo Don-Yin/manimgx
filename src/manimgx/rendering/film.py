@@ -8,6 +8,7 @@ still made); each play, as it ends, to a callback. The sounds are mixed as the v
 import contextlib
 import json
 import os
+import pathlib
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from fractions import Fraction
@@ -227,7 +228,8 @@ class Film:
     scene runs (`manimgx preview`), or in the browser, where Python has no GPU (Pyodide).
 
     Args:
-        video: The MP4 file the frames are encoded into as they come, if any.
+        video: The MP4 file the frames are encoded into as they come, if any; its folder
+            is made if it is missing.
         frames: A function handed each frame, a [`Frame`][manimgx.rendering.film.Frame] (see
             [`FrameSink`][manimgx.rendering.film.FrameSink]).
         plays: A function called as each play ends (see
@@ -278,6 +280,7 @@ class Film:
                 _engine.start_gpu()  # the film draws: the GPU comes up as it begins
             self._player = drawn = gpu(width, height)
             if video is not None:
+                pathlib.Path(video).parent.mkdir(parents=True, exist_ok=True)
                 drawn.begin_export(
                     os.fspath(video), fps=int(fps), preset=preset, crf=crf
                 )
