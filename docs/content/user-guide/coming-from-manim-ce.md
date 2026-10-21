@@ -51,6 +51,8 @@ works, but your editor marks it deprecated and names the one to use:
   `square.animate.set_color(m.RED)`.
 - `arrange_submobjects` is `arrange`, `rotate_about_origin(angle)` is
   `rotate(angle, about_point=m.ORIGIN)`, and `get_edge_center(m.UP)` is `get_top()`.
+- A getter such as `get_width()`, `get_height()` or `get_color()` is its property:
+  `width`, `height`, `color`.
 - `PGroup` is `Group`, and the singular `add_foreground_mobject` is
   `add_foreground_mobjects`.
 

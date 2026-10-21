@@ -2476,6 +2476,15 @@ class Mobject:
         """
         return self.width
 
+    @deprecated("get_height() is height: use it", category=None)
+    def get_height(self) -> float:
+        """The mobject's [height][manimgx.Mobject.height].
+
+        Returns:
+            The height, in scene units.
+        """
+        return self.height
+
     # ── layout ────────────────────────────────────────────────────────────
     def center(self) -> Self:
         """Move the mobject so the center of its bounding box is at the origin."""

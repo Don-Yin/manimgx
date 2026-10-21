@@ -2841,3 +2841,10 @@ def test_shown_keys_label_their_values_however_added() -> None:
         assert label.tex_string == key
         assert label.get_right()[0] < value.points[:, 0].min()
     assert not m.VDict([("s", m.Square())])["s"].submobjects
+
+
+def test_get_height_is_height_as_get_width_is_width() -> None:
+    """Manim CE code reads a mobject's size with both getters."""
+    rectangle = m.Rectangle(width=3.0, height=1.25)
+    assert rectangle.get_width() == rectangle.width == pytest.approx(3.0)
+    assert rectangle.get_height() == rectangle.height == pytest.approx(1.25)
