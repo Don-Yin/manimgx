@@ -466,6 +466,20 @@ class Camera:
         """
         self._fixed_in_frame.update(dict.fromkeys(mobjects))
 
+    def remove_fixed_in_frame_mobjects(self, *mobjects: Mobject) -> None:
+        """Unpin mobjects from the screen: undo
+        [`add_fixed_in_frame_mobjects`][manimgx.Camera.add_fixed_in_frame_mobjects], so
+        the camera's angles, zoom and center move them again, among the scene's depths.
+
+        A mobject that was not pinned is passed over. One that is a member of a pinned
+        mobject stays pinned with it: unpin that mobject instead.
+
+        Args:
+            *mobjects: The mobjects to unpin, as they were pinned.
+        """
+        for mob in mobjects:
+            self._fixed_in_frame.pop(mob, None)
+
 
 type Act = Callable[[Fraction, "Route | None"], Callable[[], None] | None]
 """A play's step at an instant: it brings what runs there (of the parts given, if any), and
@@ -2175,6 +2189,14 @@ class ThreeDScene(Scene):
         """
         self.add(*mobjects)
         self.camera.add_fixed_in_frame_mobjects(*mobjects)
+
+    def remove_fixed_in_frame_mobjects(self, *mobjects: Mobject) -> None:
+        """Unpin mobjects from the screen, undoing
+        [`add_fixed_in_frame_mobjects`][manimgx.ThreeDScene.add_fixed_in_frame_mobjects]:
+        they stay in the scene, and the camera moves them again. A member of a pinned
+        mobject stays pinned with it.
+        """
+        self.camera.remove_fixed_in_frame_mobjects(*mobjects)
 
 
 def _tracks(

@@ -170,6 +170,30 @@ def test_a_title_fixed_in_the_frame_changes_no_pixel_but_its_own() -> None:
     assert np.array_equal(picture(scene(True))[bottom], picture(scene(False))[bottom])
 
 
+def test_a_mobject_unpinned_from_the_frame_is_drawn_as_one_never_pinned() -> None:
+    # a square and a title, pinned and then unpinned from a turned camera's frame: the square
+    # is drawn where the camera puts it, as if it had never been pinned; the title stays pinned
+    def scene(pin: bool) -> m.Scene:
+        def construct(s: m.ThreeDScene) -> None:
+            s.set_camera_orientation(phi=60 * m.DEGREES, theta=-30 * m.DEGREES)
+            square = m.Square(side_length=2.0, fill_opacity=1.0).shift(m.RIGHT)
+            title = m.Text("A title").to_corner(m.UL)
+            if pin:
+                s.add_fixed_in_frame_mobjects(square, title)
+                s.remove_fixed_in_frame_mobjects(square)
+                assert square in s.mobjects
+                assert square not in s.camera.fixed_in_frame_mobjects
+                assert title in s.camera.fixed_in_frame_mobjects
+            else:
+                s.add(square)
+                s.add_fixed_in_frame_mobjects(title)
+            s.wait(0.1)
+
+        return scenes.scene_3d(construct)
+
+    assert np.array_equal(picture(scene(True)), picture(scene(False)))
+
+
 def test_points_show_where_an_earlier_frame_had_see_through_surfaces() -> None:
     # a see-through surface over the whole view, then over its top only: the points below it
     # show in the last frame as if it had always been at the top

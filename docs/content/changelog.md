@@ -23,6 +23,7 @@ The notable changes to ManimGX, release by release. The format follows
 - Add a preview image and social metadata when sharing website and documentation links.
 - Credit Academa and the creators in the README.
 - Add Manim CE's `partial_bezier_points`, `subdivide_bezier`, `bezier_remap`, `integer_interpolate`, `is_closed` and `get_smooth_cubic_bezier_handle_points` to the package.
+- Add `remove_fixed_in_frame_mobjects` to `ThreeDScene` and `Camera`, Manim CE's undo of `add_fixed_in_frame_mobjects`: the camera moves the mobjects again.
 
 ### Changed
 

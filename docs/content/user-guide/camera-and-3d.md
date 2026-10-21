@@ -68,7 +68,8 @@ class Hill(m.ThreeDScene):
 - `self.begin_ambient_camera_rotation(rate=0.3)` turns the camera around the scene, until
   `self.stop_ambient_camera_rotation()`.
 - `self.add_fixed_in_frame_mobjects(title)` keeps a mobject still on the screen while the
-  camera moves: here, the title stays in its corner.
+  camera moves: here, the title stays in its corner. `self.remove_fixed_in_frame_mobjects(title)`
+  lets the camera move it again.
 
 Every mobject has three coordinates, so flat mobjects work in 3D too. The
 [reference][manimgx.mobjects.three_d] shows the mobjects made for 3D, such as
