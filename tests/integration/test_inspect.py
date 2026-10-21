@@ -13,11 +13,13 @@ from manimgx.cli.storyboard import CAPTION, GAP, tile
 from manimgx.rendering.film import Frame
 
 
-def source(tmp_path: Path, body: str, base: str = "Scene") -> Path:
+def source(
+    tmp_path: Path, body: str, base: str = "Scene", size: tuple[int, int] = (320, 180)
+) -> Path:
     path = tmp_path / "scene.py"
     path.write_text(
         "import manimgx as m\n"
-        "m.config.pixel_width, m.config.pixel_height = 320, 180\n"
+        f"m.config.pixel_width, m.config.pixel_height = {size[0]}, {size[1]}\n"
         "m.config.frame_rate = 10\n"
         f"class Example(m.{base}):\n"
         "    def construct(self) -> None:\n"
@@ -102,6 +104,35 @@ def test_the_last_frame_keeps_local_names_and_problem_numbers(tmp_path: Path) ->
     assert "layout: 1 problem" in result.output
     assert "t=0.5–1s" in result.output
     assert "tiny (Text 'tiny')" in result.output
+
+
+@pytest.mark.parametrize(
+    "size", [(320, 180), (640, 360), (180, 320), (320, 320), (240, 180), (180, 240)]
+)
+def test_a_text_is_as_tall_in_every_video_shape(
+    tmp_path: Path, size: tuple[int, int]
+) -> None:
+    """A video is 1080p when its short side is 1080 px, so a text measures the same at 1080p in
+    a video of any shape and resolution."""
+    body = 'self.add(m.Text("Hello", font_size=12))\nself.wait()'
+    result = CliRunner().invoke(
+        app, ["inspect", str(source(tmp_path, body, size=size))]
+    )
+    assert result.exit_code == 1, result.output
+    assert "text is 16 px tall at 1080p" in result.output
+
+
+def test_a_camera_frame_stretched_narrow_leaves_a_texts_height(tmp_path: Path) -> None:
+    """The camera maps the frame's width and its height onto the video's apart: stretching the
+    frame's width changes how wide a text is, not how tall."""
+    body = (
+        "self.camera.frame.stretch_to_fit_width(4)\n"
+        'self.add(m.Text("Hello", font_size=12))\nself.wait()'
+    )
+    path = source(tmp_path, body, base="MovingCameraScene", size=(180, 320))
+    result = CliRunner().invoke(app, ["inspect", str(path)])
+    assert result.exit_code == 1, result.output
+    assert "text is 16 px tall at 1080p" in result.output
 
 
 def test_notes_do_not_fail_inspection(tmp_path: Path) -> None:

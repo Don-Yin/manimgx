@@ -281,7 +281,7 @@ GRIDS = {
 BACKDROPS = {"BackgroundRectangle"}
 # scene units (4 px at 1080p): a line this close to a glyph's box touches it
 TOUCH = 0.03
-# pixels tall at 1080p: text below this is hard to read
+# pixels tall at 1080p, a video whose short side is 1080 px: text below this is hard to read
 SMALL = 20
 
 
@@ -380,7 +380,9 @@ def _cut(box: Box, frame: Box) -> str | None:
 def at(seen: View) -> list[Problem]:
     """The problems a viewer sees in this view."""
     frame, things = seen.frame, seen.things
-    px_per_unit = 1080 / (frame[3] - frame[1])
+    # the camera maps the frame's height onto the video's, whatever the frame's shape
+    short = min(config.pixel_width, config.pixel_height)
+    px_per_unit = 1080 * config.pixel_height / short / (frame[3] - frame[1])
     now: list[Problem] = []
     texts = [t for t in things if t.text is not None]
     shapes = [t for t in things if t.outline is not None]
