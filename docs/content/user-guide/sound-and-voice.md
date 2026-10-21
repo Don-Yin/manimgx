@@ -62,6 +62,8 @@ class Derivative(m.Scene):
 Each animation starts with the first of its words. The scene waits until the line ends,
 so lines don't overlap. If you change the words, the animations follow the new words.
 
+Brackets come in pairs and don't nest; any other bracket is an error.
+
 ## Voices
 
 The default voice is ElevenLabs' Eleven v3, on [fal.ai](https://fal.ai). It needs your

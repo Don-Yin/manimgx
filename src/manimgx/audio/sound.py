@@ -471,20 +471,26 @@ def lines(speech: Speech, width: int = 42) -> list[tuple[float, float, str]]:
 
 # ── the script: [spans] in the text ─────────────────────────────────────────────────────
 
-_SPAN = re.compile(r"\[([^\[\]]*)\]")
+_MARK = re.compile(r"\[([^\[\]]*)\]|([\[\]])")  # a span, or a bracket that is no span's
 
 
 @deprecated("ManimGX's machinery: say calls it", category=None)
 def spans(script: str) -> tuple[str, list[tuple[int, int]]]:
     """The text of a script, its brackets taken out, and each bracketed span's characters
-    in that text: `"Here is [a circle]."` is `("Here is a circle.", [(8, 16)])`."""
+    in that text: `"Here is [a circle]."` is `("Here is a circle.", [(8, 16)])`. A span is
+    one `[` and the `]` after it, with no bracket between: any other bracket is an error."""
     text, found, at = [], [], 0
     shift = 0
-    for m in _SPAN.finditer(script):
+    for m in _MARK.finditer(script):
+        if m[2]:
+            raise ValueError(
+                f"the {m[2]!r} at character {m.start()} of {script!r} is not part of a"
+                " span: a span is one [ and the ] after it, with no bracket between"
+            )
         text.append(script[at : m.start()])
         begin = m.start() - shift
-        found.append((begin, begin + len(m.group(1))))
-        text.append(m.group(1))
+        found.append((begin, begin + len(m[1])))
+        text.append(m[1])
         at, shift = m.end(), shift + 2
     text.append(script[at:])
     return "".join(text), found

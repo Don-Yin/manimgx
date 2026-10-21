@@ -1,5 +1,6 @@
 """Sound placement and edits, and speech timing, captions and voices."""
 
+import re
 from fractions import Fraction
 from pathlib import Path
 from typing import cast
@@ -419,6 +420,26 @@ class TestScript:
         for (a, b), part in zip(found, parts[1::2], strict=True):
             assert text[a:b] == part
 
+    @given(st.text("ab []", max_size=12))
+    @example("Outer [inner [deep] bit] done.")
+    @example("An open [bracket never closes.")
+    @example("A stray] close.")
+    @example("Closed] before [open.")
+    def test_a_span_is_one_pair_of_brackets_and_any_other_bracket_is_an_error(
+        self, script: str
+    ) -> None:
+        brackets = "".join(c for c in script if c in "[]")
+        if re.fullmatch(r"(\[\])*", brackets):  # opened, closed, opened, closed…
+            assert len(spans(script)[1]) == len(brackets) // 2
+        else:
+            with pytest.raises(ValueError, match="not part of a span"):
+                spans(script)
+
+    def test_the_error_says_where_the_bracket_is(self) -> None:
+        script = "Outer [inner [deep] bit] done."
+        with pytest.raises(ValueError, match=r"the '\[' at character 6 of"):
+            spans(script)
+
     def test_a_span_is_said_from_its_first_word_to_its_last(self) -> None:
         speech = said("the derivative of x squared is two x")
         text, (span,) = spans("the derivative of [x squared] is two x")
@@ -475,6 +496,33 @@ class TestSay:
 
         with pytest.raises(ValueError, match="2 bracketed spans for 1 animations"):
             Wrong().render()
+
+    @pytest.mark.parametrize(
+        "script",
+        [
+            "Outer [inner [deep] bit] done.",
+            "An open [bracket never closes.",
+            "A stray] close.",
+        ],
+    )
+    def test_brackets_that_are_no_span_are_refused_before_anything_is_said(
+        self, script: str, cache_here: Path
+    ) -> None:
+        said_texts: list[str] = []
+
+        def voice(text: str) -> Speech:
+            said_texts.append(text)
+            return said(text)
+
+        class Refused(m.Scene):
+            def construct(self) -> None:
+                self.say(script, m.Wait())
+
+        Refused.voice = staticmethod(voice)
+        with pytest.raises(ValueError, match="not part of a span"):
+            Refused().render()
+        assert said_texts == []
+        assert not cache_here.exists()
 
 
 @pytest.mark.usefixtures("cache_here")
