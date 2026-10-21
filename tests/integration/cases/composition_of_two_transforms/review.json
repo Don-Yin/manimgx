@@ -1,6 +1,6 @@
 {
   "verdict": "working",
   "note": "Reviewed the exact-area raster correction at frame 6: Inspected coordinate grid and enlarged partial First title; one glyph-edge change preserves text and grid geometry.",
-  "facts": "sha256:42dfc4531d712eccf440a3f668754cd24fd660ecfcaf3fd8c9a0fc2c6ffd9a3c",
-  "at": "2026-10-06"
+  "facts": "sha256:2efc6b3f7c29e8ff5b323121b9996f3f2de37c2cc6d11411da9eede8d8a8dec0",
+  "at": "2026-10-20"
 }

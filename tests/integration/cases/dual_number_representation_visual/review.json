@@ -1,6 +1,6 @@
 {
   "verdict": "working",
   "note": "Reviewed the exact-area raster correction at frame 27: Inspected the two-view title, decimal expansion and enlarged decimal label; the one-pixel adjustment preserves the labels and spacing.",
-  "facts": "sha256:7a3fb5d08d9008a524e74a7aa931091c8fd679d4567f18b324d49a0e2a442f7f",
-  "at": "2026-10-06"
+  "facts": "sha256:a31245bfa0b2f89e17d07f822d771389922e71610c06b11b8d4bfc765ffb8799",
+  "at": "2026-10-20"
 }

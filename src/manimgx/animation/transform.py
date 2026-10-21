@@ -190,18 +190,19 @@ class TransformOptions(_AnimationOptions, total=False, closed=True):
 class Transform[M: Mobject = Mobject](Animation[M]):
     """Transform a mobject into the shape and style of another.
 
-    The mobject stays in the scene and ends looking like `target_mobject`, which is not
-    added (with [`ReplacementTransform`][manimgx.ReplacementTransform], the target takes
-    the mobject's place). Their parts are matched up one to one (the side with fewer
-    parts gains some, and so do the points of each pair), so the mobject may end with
-    more parts than it had. Each point travels from its start to its end in a straight
-    line, or along an arc with `path_arc`.
+    The mobject stays in the scene and ends as `target_mobject` is, which is not added
+    (with [`ReplacementTransform`][manimgx.ReplacementTransform], the target takes the
+    mobject's place): it [becomes][manimgx.Mobject.become] the target. On the way, their
+    parts are matched up one to one (the side with fewer parts gains some, and so do the
+    points of each pair), and each point travels from its start to its end in a straight
+    line, or along an arc with `path_arc`; what the matching gained goes when it ends.
 
     Transforms that begin together on one mobject compose: `square.animate.shift(RIGHT)`
-    and `Rotate(square)` played together move the square and turn it. One that begins
-    later takes the mobject over from where the others have brought it. A target that
-    has updaters and is not in the scene moves while the animation plays (the animation
-    runs its updaters), and the mobject follows it.
+    and `Rotate(square)` played together move the square and turn it, and it ends as
+    their last frame shows it. One that begins later takes the mobject over from where
+    the others have brought it. A target that has updaters and is not in the scene moves
+    while the animation plays (the animation runs its updaters), and the mobject follows
+    it.
 
     Args:
         mobject: The mobject to transform.
@@ -320,8 +321,16 @@ class Transform[M: Mobject = Mobject](Animation[M]):
             compositor.join(self)
 
     def finish(self) -> None:
+        # it rests as it ends, where it alone drove its leaves; where others drove them too,
+        # they compose, and one that ends as given leaves what the others did
         super().finish()
-        if (compositor := self._compositor()) is not None:
+        compositor = self._compositor()
+        if compositor is None or not self.shared:
+            if self._rest is not None:
+                self.mobject.become(self._rest)
+        elif self._ends_as_given():
+            compositor.leave(self)
+        if compositor is not None:
             compositor.finished.add(id(self))
 
     def _compositor(self) -> Compositor | None:
@@ -384,9 +393,38 @@ class Transform[M: Mobject = Mobject](Animation[M]):
             moving.advance(t)
         self.rederive()
 
+    def _ends_as_given(self) -> bool:
+        """Whether it leaves its mobject as it was given, whatever its last frame shows: a
+        remover does, as it takes it out of the scene."""
+        return self.is_remover()
+
+    def _resting(self, source: Mobject, own: list[Mobject | None]) -> Mobject | None:
+        # as it was given, if it ends so; else, when its frames blend its keyframes, the
+        # keyframe its last frame shows, as derived
+        if self._ends_as_given():
+            return source.copy()
+        at = self._resting_at(len(own) - 1)
+        if at is None:
+            return None
+        frame = own[at]
+        return (source if frame is None else frame).copy()
+
+    def _resting_at(self, steps: int) -> int | None:
+        # the keyframe the last frame shows: none, for frames of a class's own making (not
+        # this blend of keyframes at the eased progress) or that end between two
+        kind = type(self)
+        if (
+            kind.interpolate is not Animation.interpolate
+            or kind.interpolate_mobject is not Animation.interpolate_mobject
+            or kind.interpolate_keyframes is not Transform.interpolate_keyframes
+        ):
+            return None
+        i, t = keyframe_at(steps, self.get_sub_alpha(1.0, 0, 1))
+        return i + int(t) if t in (0.0, 1.0) else None
+
     def rederive(self) -> None:
         # the keyframes again (from the model, if the object updates; own objects copied
-        # afresh), aligned with the object
+        # afresh), aligned with the object; and what it rests as, from them
         model = self.model
         self.frames = [
             (
@@ -402,6 +440,13 @@ class Transform[M: Mobject = Mobject](Animation[M]):
             )
             for key, frame in zip(self.keys, self.frames, strict=True)
         ]
+        if self._ends_as_given():
+            if model is not None:  # as its updaters have it now
+                self._rest = model.copy()
+        elif (at := self._resting_at(len(self.frames) - 1)) is not None and (
+            model is not None or isinstance(self.keys[at], Mobject)
+        ):  # a keyframe derived afresh, not yet aligned
+            self._rest = self.frames[at].copy()
         for _ in range(2):
             for frame in self.frames:
                 self.mobject.align_data(frame)
@@ -496,6 +541,19 @@ class Compositor:
                 if id(part.tween) not in self.finished:
                     part.tween.shared.add(id(leaf))
             self.leaves[id(leaf)] = _Leaf(leaf, tween)
+
+    def leave(self, tween: Transform) -> None:
+        """`tween` ends, leaving its mobject as it was given: each leaf it drove with others
+        is as they have it, and one it drove alone as they all found it."""
+        for leaf in tween.mobject.family_members_with_points():
+            entry = self.leaves.get(id(leaf))
+            if entry is None or all(p.tween is not tween for p in entry.parts):
+                continue
+            entry.parts = [p for p in entry.parts if p.tween is not tween]
+            if entry.parts:
+                entry.compose()
+            else:
+                leaf._geometry, leaf.paint = entry.geometry, entry.paint
 
     def write(
         self, leaf: Mobject, tween: Transform, a: Mobject, b: Mobject, t: float

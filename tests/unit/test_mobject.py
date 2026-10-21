@@ -43,6 +43,14 @@
 - Its points are a value: assigned others, it takes them. A family grown for a transform
   (`add_n_more_submobjects`) follows each part with invisible copies of itself, spread as
   evenly as can be, the parts themselves kept.
+- Its whole value is a value too: `become` gives it another's at once, and it stays itself. It
+  takes what each member shows and how the family is divided (a kind that can't hold the
+  other's own shape, a group or a cloud, holds it in a first member); what it was never shows,
+  and becoming the same value again changes nothing, not even which objects its members are.
+  It stays the same object, of its own class, and each member stays itself, updaters and all,
+  where the other has a member drawn as it is in its place; the members it gains have none.
+  The other is left as it was and shares no member with it, even when it is the mobject itself
+  or one of its members.
 
 A VMobject is a path: cubic curves, four control points each.
 
@@ -97,6 +105,7 @@ from hypothesis.stateful import (
 )
 from tests import oracles
 from tests.oracles import assert_replica, look, reachable, reaches
+from tests.scenes import frames, scene
 from tests.strategies import (
     MOBJECTS,
     angles,
@@ -709,6 +718,164 @@ class TestEveryMobject:
             drawn_by_member = oracles.drawn_box(member)
             assert drawn_by_member is not None
             np.testing.assert_allclose(mine, drawn_by_member, atol=tolerance)
+
+
+# ── become ────────────────────────────────────────────────────────────────────────────────
+type Place = tuple[int, ...]
+
+
+def holds(mob: m.Mobject, other: m.Mobject) -> bool:
+    """Whether the mobject's kind can hold the other's own shape."""
+    return not other.has_points() or oracles.kind(mob) == oracles.kind(other)
+
+
+def places(mob: m.Mobject, place: Place = ()) -> dict[Place, m.Mobject]:
+    """Every member, by its place in the family: the indices from the mobject down."""
+    found = {place: mob}
+    for i, sub in enumerate(mob.submobjects):
+        found |= places(sub, (*place, i))
+    return found
+
+
+def kept(
+    before: dict[Place, m.Mobject], other: dict[Place, m.Mobject], held: bool
+) -> list[Place]:
+    """The places where a member stays itself: the other has a member drawn as it is there,
+    and so at every place above it (the other's members a step down, when the mobject
+    holds the other's own shape in a first member)."""
+    if not held:
+        other = {
+            (0,) if place == () else (place[0] + 1, *place[1:]): sub
+            for place, sub in other.items()
+        }
+        other[()] = before[()]
+    return [
+        place
+        for place in before
+        if all(
+            place[:n] in other
+            and (
+                n == 0
+                or oracles.kind(before[place[:n]]) == oracles.kind(other[place[:n]])
+            )
+            for n in range(len(place) + 1)
+        )
+    ]
+
+
+class TestBecome:
+    """`become`'s laws, for every pair of public classes."""
+
+    @given(mobjects, mobjects)
+    def test_a_mobject_takes_the_others_value(
+        self, mob: m.Mobject, other: m.Mobject
+    ) -> None:
+        held = holds(mob, other)
+        mob.become(other)
+        assert oracles.drawing(mob) == oracles.drawing(other)
+        if held:
+            assert oracles.value(mob) == oracles.value(other)
+        else:  # its own shape is the other's first member's
+            assert not mob.has_points()
+            assert oracles.drawing(mob.submobjects[0]) == oracles.drawing(other)[:1]
+            assert oracles.value(mob)[2:] == oracles.value(other)[1:]
+
+    @given(mobjects, mobjects, mobjects)
+    def test_what_a_mobject_was_never_shows(
+        self, mob: m.Mobject, first: m.Mobject, then: m.Mobject
+    ) -> None:
+        fresh = mob.copy()
+        mob.become(first)
+        mob.become(then)
+        fresh.become(then)
+        assert oracles.value(mob) == oracles.value(fresh)
+
+    @given(mobjects, mobjects)
+    def test_becoming_the_same_value_again_changes_nothing(
+        self, mob: m.Mobject, other: m.Mobject
+    ) -> None:
+        mob.become(other)
+        members, shown = mob.get_family(), oracles.value(mob)
+        mob.become(other)
+        assert all(a is b for a, b in zip(mob.get_family(), members, strict=True))
+        assert oracles.value(mob) == shown
+
+    @given(mobjects, mobjects)
+    def test_a_mobject_and_its_members_stay_themselves(
+        self, mob: m.Mobject, other: m.Mobject
+    ) -> None:
+        before = places(mob)
+        for member in before.values():
+            member.add_updater(lambda _: None)
+        staying = kept(before, places(other), holds(mob, other))
+        assert mob.become(other) is mob
+        after = places(mob)
+        for place in staying:
+            assert after[place] is before[place]
+            assert after[place].get_updaters()
+        gained = [
+            sub for sub in after.values() if all(sub is not b for b in before.values())
+        ]
+        assert not any(sub.get_updaters() for sub in gained)
+
+    @given(mobjects, mobjects)
+    def test_the_other_is_left_as_it_was(
+        self, mob: m.Mobject, other: m.Mobject
+    ) -> None:
+        shown, members = oracles.value(other), other.get_family()
+        mob.become(other)
+        assert oracles.value(other) == shown
+        assert all(a is b for a, b in zip(other.get_family(), members, strict=True))
+        assert not {id(sub) for sub in mob.get_family()} & {id(s) for s in members}
+
+    @given(mobjects)
+    def test_becoming_itself_changes_nothing(self, mob: m.Mobject) -> None:
+        shown, members = oracles.value(mob), mob.get_family()
+        mob.become(mob)
+        assert oracles.value(mob) == shown
+        assert all(a is b for a, b in zip(mob.get_family(), members, strict=True))
+
+    @given(mobjects, mobjects)
+    def test_a_mobject_can_become_one_of_its_own_members(
+        self, mob: m.Mobject, other: m.Mobject
+    ) -> None:
+        group = m.Group(mob, other)
+        expected = oracles.drawing(group.submobjects[1])
+        group.become(group.submobjects[1])
+        assert oracles.drawing(group) == expected
+
+    def test_a_redrawn_mobject_that_empties_and_comes_back_is_what_it_draws(
+        self,
+    ) -> None:
+        """A redraw's value replaces the last, so emptied and drawn again, it is a line
+        again: not a line's points held one member down."""
+        gone = m.ValueTracker(0.0)
+        line = m.always_redraw(
+            lambda: m.VMobject() if gone.get_value() else m.Line(m.LEFT, m.RIGHT)
+        )
+        for empty in (1.0, 0.0) * 3:
+            gone.set_value(empty)
+            line.update(0.1)
+        assert len(line.get_family()) == 1
+        assert (line.get_start() == m.LEFT).all()
+
+    def test_a_group_that_becomes_a_line_draws_the_line(self) -> None:
+        """A group draws nothing of its own: it holds the line's shape in a first member,
+        as the line draws it."""
+
+        def shown(make: Callable[[], m.Mobject]) -> np.ndarray:
+            def build(played: m.Scene) -> None:
+                played.add(make())
+                played.wait(0.1)
+
+            return frames(scene(build))[0]
+
+        def line() -> m.Line:
+            return m.Line(3 * m.LEFT, 3 * m.RIGHT, stroke_width=20)
+
+        np.testing.assert_array_equal(
+            shown(lambda: m.Group(m.Square()).become(line())), shown(line)
+        )
 
 
 # ── replicas ──────────────────────────────────────────────────────────────────────────────

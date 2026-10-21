@@ -7,9 +7,11 @@ And what an object holds, walked plainly: `reachable(root)` is everything an obj
 `reaches(root, targets)` says whether it keeps any of them, with no garbage collection to wait
 on; `assert_replica(original, replica)` walks two object graphs side by side, to show that one
 is an isomorphic copy of the other sharing no mutable part; `drawn_box(mob)` is the tight box
-of what a mobject's family draws."""
+of what a mobject's family draws; `look(mob)` is what it shows, `value(mob)` that and how its
+family is divided, whatever its classes, and `drawing(mob)` what it draws, however divided."""
 
 import contextlib
+import dataclasses
 import enum
 import functools
 import gc
@@ -125,6 +127,54 @@ def look(mob: object) -> list[tuple[object, ...]]:
             )
         )
     return seen
+
+
+def kind(mob: object) -> str:
+    """How a mobject is drawn: as a path, as points, as a mesh, or not at all."""
+    import manimgx as m
+
+    kinds = (m.VMobject, m.PMobject, m.MeshMobject)
+    return next((k.__name__ for k in kinds if isinstance(mob, k)), "Mobject")
+
+
+def value(mob: object) -> list[tuple[object, ...]]:
+    """What a mobject's family shows and how it is divided, member by member: how it is drawn
+    (not its class), its points, every field of its paint and how many members it has; the
+    mobject's own kind left out. Where a member is drawn (its z-index) is not what it shows."""
+    from manimgx.mobject import Mobject
+
+    assert isinstance(mob, Mobject)
+    rows = [(*_drawn(member), len(member.submobjects)) for member in mob.get_family()]
+    return [rows[0][1:], *rows[1:]]
+
+
+def drawing(mob: object) -> list[tuple[object, ...]]:
+    """What a mobject's family draws, member by member, however it is divided."""
+    from manimgx.mobject import Mobject
+
+    assert isinstance(mob, Mobject)
+    return [_drawn(member) for member in mob.get_family() if member.has_points()]
+
+
+def _drawn(member: object) -> tuple[object, ...]:
+    from manimgx.drawing.paint import Paint
+    from manimgx.mobject import Mobject
+
+    assert isinstance(member, Mobject)
+    fields = [name.lstrip("_") for name in Paint.__annotations__ if name != "_derived"]
+    paint = tuple(_plain(getattr(member.paint, name)) for name in fields)
+    return (kind(member), _plain(member.points), *paint)
+
+
+def _plain(x: object) -> object:
+    """A value as plain data, to compare: an array by its bytes, a dataclass by its fields."""
+    if isinstance(x, np.ndarray):
+        return (x.dtype.str, x.shape, x.tobytes())
+    if isinstance(x, tuple | list):
+        return tuple(_plain(item) for item in x)
+    if dataclasses.is_dataclass(x) and not isinstance(x, type):
+        return tuple(_plain(getattr(x, f.name)) for f in dataclasses.fields(x))
+    return x
 
 
 def polygon_area(xy: np.ndarray) -> float:

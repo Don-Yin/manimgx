@@ -256,10 +256,6 @@ class ShowPassingFlash(Transform):
             **kwargs,
         )
 
-    def clean_up_from_scene(self, scene: Scene) -> None:
-        super().clean_up_from_scene(scene)
-        trimmed(self.mobject, 0, 1)
-
 
 class DrawBorderThenFill(Transform):
     """Draw a mobject's outline, then fill it in.
@@ -297,8 +293,6 @@ class DrawBorderThenFill(Transform):
         "rate_func": double_smooth,
         "introducer": True,
     }
-    # the last keyframe's parts and their own paints, to end on
-    _own: list[tuple[Mobject, Paint]]
 
     def __init__(
         self,
@@ -336,16 +330,15 @@ class DrawBorderThenFill(Transform):
     def _filled(self, m: Mobject) -> Mobject:
         """The object, but a part that draws no stroke has its unseen stroke in its border's
         paint: its border thins away in it, not in a color it never shows."""
-        self._own = [(part, part.paint) for part in m.family_members_with_points()]
-        for part, paint in self._own:
-            if not _draws_stroke(paint):
+        for part in m.family_members_with_points():
+            if not _draws_stroke(part.paint):
                 self._border(part)
         return m
 
-    def finish(self) -> None:
-        for part, paint in self._own:  # it ends as itself: its unseen strokes its own
-            part.paint = paint
-        super().finish()
+    def _ends_as_given(self) -> bool:
+        # drawn and filled, it is itself: its unseen strokes its own
+        steps = len(self.keys) - 1
+        return self._resting_at(steps) == steps or super()._ends_as_given()
 
 
 def _draws_stroke(paint: Paint) -> bool:
@@ -564,10 +557,6 @@ class FadeOut(_Fade):
     """
 
     defaults: ClassVar[AnimationOptions] = {"remover": True}
-
-    def clean_up_from_scene(self, scene: Scene) -> None:
-        super().clean_up_from_scene(scene)
-        self.interpolate(0)
 
 
 class GrowFromPoint(Transform):
@@ -955,8 +944,10 @@ class ReplacementTransform(Transform):
 class TransformFromCopy(Transform):
     """Transform a copy of a mobject into another, leaving the mobject where it is.
 
-    `target_mobject` joins the scene, starting as a copy of the mobject and turning into
-    itself; the mobject stays as it is.
+    `target_mobject` joins the scene, starting as a copy of the mobject as it is when the
+    animation begins, and turns into itself as any transform turns one mobject into
+    another: eased, staggered and along `path_arc` from the copy to it. It ends exactly as
+    it was; the mobject stays as it is.
 
     Args:
         mobject: The mobject the copy is made from.
@@ -984,10 +975,7 @@ class TransformFromCopy(Transform):
         target_mobject: Mobject,
         **kwargs: Unpack[TransformOptions],
     ) -> None:
-        super().__init__(target_mobject, mobject, **kwargs)
-
-    def interpolate(self, alpha: float) -> None:
-        super().interpolate(1 - alpha)
+        super().__init__(target_mobject, keys=(mobject, None), **kwargs)
 
 
 class ClockwiseTransform(Transform):
@@ -1488,8 +1476,8 @@ class FadeTransform(Transform):
 
     The mobject fades out as it moves and stretches onto `target_mobject`, and the
     target fades in from the mobject's place and size. When it finishes, the target is
-    in the scene and the mobject is not (it is back as it was when the animation was
-    made).
+    in the scene and the mobject is not (it is back as it was when the animation
+    began).
 
     Args:
         mobject: The mobject to fade out.
@@ -1529,7 +1517,6 @@ class FadeTransform(Transform):
             stretch,
             dim_to_match,
         )
-        self._start = mobject.copy()  # what the mobject is put back to when it is done
         super().__init__(
             Group(mobject, target_mobject.copy()),
             keys=(self._fading_in, self._faded_out),
@@ -1565,10 +1552,12 @@ class FadeTransform(Transform):
             source.replace(target, stretch=self.stretch, dim_to_match=self.dim_to_match)
         source.set_opacity(0)
 
+    def _ends_as_given(self) -> bool:
+        return True  # the mobject leaves as it was, and the target comes in as it is
+
     def clean_up_from_scene(self, scene: Scene) -> None:
         Animation.clean_up_from_scene(self, scene)
         scene.remove(self.mobject)
-        self.mobject[0].become(self._start)
         scene.add(self.to_add_on_completion)
 
 
@@ -1603,9 +1592,9 @@ class FadeTransformPieces(FadeTransform):
         ```
     """
 
-    def begin(self) -> None:
-        self.mobject[0].align_submobjects(self.mobject[1])
-        super().begin()
+    def _ghosted(self, group: Mobject, i: int, j: int) -> Mobject:
+        group[0].align_submobjects(group[1])  # the pieces matched up
+        return super()._ghosted(group, i, j)
 
     def ghost_to(self, source: Mobject, target: Mobject) -> None:
         for sm0, sm1 in zip(source.get_family(), target.get_family(), strict=True):

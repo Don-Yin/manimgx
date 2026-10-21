@@ -224,6 +224,7 @@ class Animation[M: Mobject = Mobject]:
         self.lag_ratio = o.get("lag_ratio", 0.0)
         self.use_override = o.get("use_override", True)
         self.frames: list[Mobject] = []  # the keyframes, as derived (`derive`)
+        self._rest: Mobject | None = None  # what its mobject is once it ends (`derive`)
         self._model: M | None = None
         self._scene: Scene | None = None  # the scene it plays in (`_setup_scene`)
         self._mobject = mobject
@@ -369,10 +370,17 @@ class Animation[M: Mobject = Mobject]:
             )
             for key in self.keys
         ]
+        self._rest = self._resting(source, own)  # before alignment changes them
         for frame in own:
             if frame is not None:
                 self.mobject.align_data(frame)
         self.frames = [source.copy() if frame is None else frame for frame in own]
+
+    def _resting(self, source: Mobject, own: list[Mobject | None]) -> Mobject | None:
+        """What the mobject is once the animation ends, as `become` makes it: None, for an
+        animation whose own steps decide it (a [`Transform`][manimgx.Transform] rests as a
+        keyframe, as it finishes)."""
+        return None
 
     @deprecated(
         "Manim CE's machinery: ManimGX calls it itself (a custom animation overrides interpolate_mobject)",
@@ -471,8 +479,8 @@ class Animation[M: Mobject = Mobject]:
         model = self.model
         if model is None:
             return
-        self.derive(model)
         self.mobject.become(model)
+        self.derive(model)
 
     # ── the per-frame function ────────────────────────────────────────────
     @deprecated(

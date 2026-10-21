@@ -7,6 +7,9 @@ its own.
   took the updaters over with `match_updaters`) runs them on itself, and leaves its original
   as it was.
 - A replica does not keep its original alive.
+- The member a mobject's own points move into (when it becomes a mobject with none, or a
+  transform aligns it) is a part of it, not a replica: the mobject's updaters act on its whole
+  family, so they leave the member as they leave the mobject, and run once.
 """
 
 import gc
@@ -85,6 +88,42 @@ def cases(replicas: list[str]) -> list[tuple[str, str]]:
         # match_updaters gives the same functions: a user's method stays its mobject's
         if not (name == "a method of its own" and replica == "match_updaters")
     ]
+
+
+def shown(mob: m.Mobject) -> list[tuple[object, ...]]:
+    """What the members with points show: not how the family is divided."""
+    return [row[:-1] for row in look(mob) if row[1]]
+
+
+@pytest.mark.parametrize("name", UPDATING)
+def test_the_member_that_takes_a_mobjects_points_leaves_its_updaters_as_they_were(
+    name: str,
+) -> None:
+    whole, change = UPDATING[name]()
+    pushed, change_pushed = UPDATING[name]()
+    pushed.push_self_into_submobjects()
+    for mob, edit in ((whole, change), (pushed, change_pushed)):
+        edit()
+        mob.update(0.5)
+    assert shown(pushed) == shown(whole)
+
+
+def test_a_redrawn_mobject_that_becomes_empty_stays_one_family() -> None:
+    """When what is redrawn has no points, the mobject's own points move into a member of
+    its own; the member is a part of it, not a replica: it runs none of the updaters, so an
+    update does not push the points into one member after another, without end."""
+    gone = m.ValueTracker(0.0)
+    shape = m.always_redraw(lambda: m.VMobject() if gone.get_value() else m.Square())
+    gone.set_value(1.0)
+    sizes = []
+    for _ in range(4):
+        shape.update(0.1)
+        sizes.append(len(shape.get_family()))
+    assert sizes == [sizes[0]] * 4
+    assert all(not member.get_updaters() for member in shape.get_family()[1:])
+    gone.set_value(0.0)
+    shape.update(0.1)  # the square again, drawn by the member that holds its points
+    np.testing.assert_allclose(shape.get_all_points(), m.Square().get_all_points())
 
 
 @pytest.mark.parametrize(("name", "replica"), cases(list(REPLICAS)))

@@ -13,6 +13,12 @@ together on one mobject compose; a replacement leaves its target in its mobject'
   step of a motion, as a turn is.)
 - Paint composes channel by channel: a fade and a recolor played together both happen, the
   same in either order.
+- A part that ends with its mobject as it was given (a remover, `FadeTransform`, a `Write`
+  that has drawn it) leaves the composition as it ends: what the others did to the mobject
+  stays, and nothing of its own.
+- A transform from a copy is the copy turning into the target: frame for frame what a
+  replacement of the copy by the target shows (eased, staggered and along its arc from the
+  copy to the target), and the target ends exactly as itself.
 - Played, a transform made to replace its mobject (`replace_mobject_with_target_in_scene`, as
   a scene gives it) leaves the scene holding its target where the mobject was; one with no
   target of its own leaves the mobject (a remover, nothing): never an object of its own making.
@@ -35,6 +41,7 @@ import numpy as np
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests import oracles
 from tests.scenes import Recorder, assert_same_frames, record, scene
 from tests.strategies import vectors
 
@@ -170,6 +177,65 @@ def test_a_fade_and_a_recolor_both_happen_in_either_order() -> None:
     color = mix_rgba(m.ManimColor(m.BLUE).to_rgba(), m.ManimColor(m.RED).to_rgba(), 0.5)
     np.testing.assert_allclose(fill[0, :3], color[:3], atol=1e-9)
     assert fill[0, 3] == pytest.approx(0.5)
+
+
+# each: an animation that ends with the square as it was given
+AS_GIVEN: dict[str, Callable[[m.Square], m.Animation]] = {
+    "FadeOut": m.FadeOut,
+    "FadeOut with a shift": lambda sq: m.FadeOut(sq, shift=m.UP),
+    "Uncreate": m.Uncreate,
+    "Unwrite": m.Unwrite,
+    "ShowPassingFlash": m.ShowPassingFlash,
+    "FadeTransform": lambda sq: m.FadeTransform(sq, m.Circle().shift(m.DOWN)),
+    "Write": m.Write,
+}
+
+
+@pytest.mark.parametrize("name", sorted(AS_GIVEN))
+def test_a_part_that_ends_as_given_leaves_what_the_others_did(name: str) -> None:
+    square = m.Square(1.2, color=m.BLUE, fill_opacity=0.5).set_stroke(m.RED, width=0)
+    moved = square.copy().shift(m.RIGHT).rotate(0.5)
+
+    def tell(s: m.Scene) -> None:
+        s.add(square)
+        s.play(AS_GIVEN[name](square), square.animate.shift(m.RIGHT).rotate(0.5))
+
+    scene(tell).render()
+    np.testing.assert_allclose(square.points, moved.points, atol=1e-12)
+    assert oracles.value(square)[0][1:] == oracles.value(moved)[0][1:]  # all its paint
+
+
+@pytest.mark.parametrize("fast", [True, False])
+def test_a_transform_from_a_copy_is_the_copy_turning_into_the_target(
+    fast: bool,
+) -> None:
+    options: TransformOptions = {
+        "rate_func": rf.rush_into,
+        "path_arc": 1.0,
+        "lag_ratio": 0.5,
+    }
+
+    def tell(from_copy: bool) -> tuple[Recorder, m.Mobject, list[tuple[object, ...]]]:
+        source = m.VGroup(m.Square(1.0), m.Square(0.6).shift(m.RIGHT)).shift(m.LEFT)
+        target = m.VGroup(
+            *(m.Circle(0.5, color=m.RED).shift(i * m.UP) for i in range(2))
+        ).shift(2 * m.RIGHT)
+        given = oracles.value(target)
+
+        def story(s: Recorder) -> None:
+            s.add(source)
+            s.play(
+                m.TransformFromCopy(source, target, **options)
+                if from_copy
+                else m.ReplacementTransform(source.copy(), target, **options)
+            )
+
+        return record(story, fast=fast), target, given
+
+    copied, target, given = tell(from_copy=True)
+    replaced, _, _ = tell(from_copy=False)
+    assert_same_frames(copied.frames, replaced.frames)
+    assert oracles.value(target) == given
 
 
 REPLACE: TransformOptions = {"replace_mobject_with_target_in_scene": True}

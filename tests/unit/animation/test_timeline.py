@@ -4,11 +4,17 @@ reached exactly, rate functions followed past their ends.
 - Every animation, by registry (`ANIMATIONS`): made, it changes none of the mobjects it is
   given, nor their saved states; begun, it shows what it showed (it acts only when brought to a
   progress); brought to a progress, it shows the same whether or not it was at another before
-  (a composition only going forward: its finished parts stay finished).
+  (a composition only going forward: its finished parts stay finished); finished, it rests as
+  its last frame showed it, and what leaves the scene with it as it was given.
 - A part's progress runs through its window of the animation's (the first opening at 0, the
   last closing at 1), eased by the rate function; at the ends of its window it is exactly the
   rate function's ends, so a finished animation is exactly its end state, a play of no length
   too.
+- Played with nothing else driving its mobject meanwhile, a transform ends as its mobject would
+  had it become the keyframe its last frame shows: its target, or, for one that comes back (as
+  `there_and_back` does), what it began as; never the points and members its frames needed
+  in between, nor what it was before (so a restore brings back exactly what was saved). A
+  remover leaves its mobjects as they were.
 - Past the ends of the unit interval (a rate function that overshoots or backs up), a tween's
   end intervals run on: a move or a turn eased by `ease_out_back` goes 10% past its end and
   back.
@@ -52,6 +58,7 @@ import numpy as np
 import pytest
 from hypothesis import example, given, reject, settings
 from hypothesis import strategies as st
+from tests.oracles import drawn_box, value
 from tests.oracles import look as appearance
 from tests.scenes import (
     SHAPES,
@@ -77,6 +84,7 @@ from manimgx.animation import easing as rf
 from manimgx.animation.timeline import (
     Animation,
     AnimationGroup,
+    animation_defaults,
     keyframe_at,
     prepare,
     schedule,
@@ -175,6 +183,59 @@ class TestEnds:
                     getattr(got.paint, name), getattr(want.paint, name)
                 )
 
+    @pytest.mark.parametrize("fast", [True, False])
+    @given(shapes=st.lists(st.sampled_from(sorted(SHAPES)), min_size=3, max_size=3))
+    def test_a_transform_ends_as_its_target_whatever_came_before(
+        self, fast: bool, shapes: list[str]
+    ) -> None:
+        """Not the points and members its frames needed in between, nor what it was."""
+        mob, first, then = (SHAPES[name]() for name in shapes)
+        expected = mob.copy().become(then)
+
+        def story(s: Recorder) -> None:
+            s.add(mob)
+            s.play(m.Transform(mob, first))
+            s.play(m.Transform(mob, then))
+
+        record(story, fast=fast)
+        assert value(mob) == value(expected)
+
+    @pytest.mark.parametrize("fast", [True, False])
+    @given(
+        start=st.sampled_from(sorted(SHAPES)), between=st.sampled_from(sorted(SHAPES))
+    )
+    def test_a_restore_brings_back_exactly_what_was_saved(
+        self, fast: bool, start: str, between: str
+    ) -> None:
+        mob = SHAPES[start]().save_state()
+        saved = value(mob)
+
+        def story(s: Recorder) -> None:
+            s.add(mob)
+            s.play(m.Transform(mob, SHAPES[between]()))
+            s.play(m.Restore(mob))
+
+        record(story, fast=fast)
+        assert value(mob) == saved
+
+    @pytest.mark.parametrize("fast", [True, False])
+    @given(
+        start=st.sampled_from(sorted(SHAPES)), target=st.sampled_from(sorted(SHAPES))
+    )
+    def test_one_that_comes_back_ends_as_its_mobject_began(
+        self, fast: bool, start: str, target: str
+    ) -> None:
+        """Not as its frames aligned it with the target."""
+        mob = SHAPES[start]()
+        began = value(mob)
+
+        def story(s: Recorder) -> None:
+            s.add(mob)
+            s.play(m.Transform(mob, SHAPES[target](), rate_func=rf.there_and_back))
+
+        record(story, fast=fast)
+        assert value(mob) == began
+
     @pytest.mark.parametrize(
         "rate",
         [rf.ease_out_back, rf.ease_in_back, rf.running_start, rf.ease_out_elastic],
@@ -237,6 +298,15 @@ def assert_same_leaves(a: list[Look], b: list[Look]) -> None:
         assert same_look(x, y), f"leaf {i} differs"
 
 
+# the registry's removers (UntypeWithCursor's cursor joins its text, and leaves with it)
+REMOVERS = sorted(
+    name
+    for name in ANIMATIONS
+    if animation_defaults(getattr(m, name)).get("remover")
+    and name != "UntypeWithCursor"
+)
+
+
 def every(xfails: dict[str, str] | None = None) -> pytest.MarkDecorator:
     """Each registry entry, those that fail the law for a bug of their own marked so."""
     xfails = xfails or {}
@@ -289,6 +359,40 @@ class TestEveryAnimation:
         direct.begin()
         direct.interpolate(b)
         assert_same_leaves(visible(there, anim), visible(straight, direct))
+
+    @every()
+    def test_finished_it_rests_as_its_last_frame_showed_it(self, name: str) -> None:
+        """What it rests as draws where its end showed it; what leaves the scene with it
+        (a remover's mobject, a cross-fade's) is as it was given."""
+        played = ANIMATIONS[name]
+        world = played.world()
+        anim = played.make(world)
+        given = [drawn_box(mob) for mob in world]
+        anim.begin()
+        anim.interpolate(1)
+        shown = [drawn_box(mob) for mob in world]
+        anim.finish()
+        leaves = isinstance(anim, Transform) and anim._ends_as_given()
+        for box, want in zip(
+            [drawn_box(mob) for mob in world], given if leaves else shown, strict=True
+        ):
+            assert (box is None) == (want is None)
+            if box is not None and want is not None:
+                np.testing.assert_allclose(box, want, atol=1e-9)
+
+    @pytest.mark.parametrize("name", REMOVERS)
+    def test_a_remover_leaves_its_mobjects_as_they_were(self, name: str) -> None:
+        played = ANIMATIONS[name]
+        world = played.world()
+        anim = played.make(world)
+        before = [value(mob) for mob in world]
+
+        def story(s: Recorder) -> None:
+            s.add(*world)
+            s.play(anim)
+
+        record(story)
+        assert [value(mob) for mob in world] == before
 
 
 SUSPENDING: dict[str, Callable[[m.Mobject], m.Animation]] = {

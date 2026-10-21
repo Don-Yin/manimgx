@@ -33,9 +33,13 @@ The notable changes to ManimGX, release by release. The format follows
 - Install ManimGX in the Quickstart with one command, `pip install manimgx`, and run `manimgx` directly throughout the docs.
 - Move the benchmark to `benchmarks/`, whose README explains its scenes, method and results; the README's numbers link to it.
 - Arrange the Rendering and sharing page by command, with settings, tall videos and rendering from Python under Render.
+- Make `become` give a mobject another's value, member by member: each member takes its counterpart's points, shape and whole style (its joint and cap styles and 3D shading too), and stays itself, updaters and all, where the other has a member drawn as it is in its place; the members it gains come without updaters, and those it has beyond the other's go. What it was never shows through, becoming the same value again changes nothing, the other is left as it was, and a mobject can become itself or one of its own members. A group or a point cloud that becomes a shape holds the shape in a first member. It is faster too.
+- End a transform as its target: its mobject becomes the keyframe its last frame shows, so the points and parts its frames gained on the way never outlive it. A morph that follows another starts from the shape the first ended on, not from that shape divided as the first needed it; `Restore` brings back exactly what was saved, and a remover leaves its mobject as it was. Transforms played together on one mobject still compose. Films that chain morphs change slightly.
+- Play `TransformFromCopy` forward: the target turns from the mobject's copy into itself as any transform does, its rate function, `path_arc` and `lag_ratio` running from the copy to the target (they ran backward, the arcs bending the other way), and it ends exactly as itself.
 
 ### Fixed
 
+- Redraw a shape that empties with `always_redraw` without a RecursionError, and keep a mobject's updaters off the member its points move into when a transform aligns it, so a relative updater such as `always_shift` no longer runs twice on them ([#32](https://github.com/academa-labs/manimgx/issues/32)).
 - Keep resources needed by queued video frames until their transparency retries finish, fixing render failures during cache cleanup ([#16](https://github.com/academa-labs/manimgx/issues/16)).
 - Draw a storyboard picture without dropping the frame the film holds back, fixing `manimgx render` failures ("unknown shape") under memory pressure.
 - Draw a vectorized curve whose function gives a component as one number (`use_vectorized` with `lambda t: (t, t**2, 0)`), which failed with numpy's inhomogeneous-shape error.

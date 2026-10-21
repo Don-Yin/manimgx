@@ -424,6 +424,24 @@ def _copy_state(source: "Mobject", target: "Mobject", memo: dict[int, object]) -
             copied[name] = _copied(value, memo)
 
 
+@functools.cache
+def _kind(cls: type["Mobject"]) -> type["Mobject"]:
+    """How a class of mobject is drawn: as a path, as points, as a mesh, or not at all."""
+    kinds = (VMobject, PMobject, MeshMobject)
+    return next((kind for kind in kinds if issubclass(cls, kind)), Mobject)
+
+
+def _fresh(mob: "Mobject", alone: bool = False) -> "Mobject":
+    """A member `become` gains: a copy of the other's (alone: without its members), with
+    no updaters."""
+    made = mob.copy()
+    if alone:
+        made.submobjects = []
+    for part in made.get_family():
+        part.clear_updaters()
+    return made
+
+
 def prototype[S: "Mobject", **P](
     init: Callable[Concatenate[S, P], None],
 ) -> Callable[Concatenate[S, P], None]:
@@ -3985,11 +4003,13 @@ class Mobject:
     @deprecated("Manim CE's machinery: ManimGX calls it itself", category=None)
     def push_self_into_submobjects(self) -> Self:
         """Move the mobject's own points into a new submobject, added last: a copy of it
-        without submobjects. The mobject keeps its submobjects, and has no points of its
-        own.
+        without submobjects or updaters (a part of the mobject, which keeps its updaters,
+        not a replica that would run them too). The mobject keeps its submobjects, and has
+        no points of its own.
         """
         clone = self.copy()
         clone.submobjects = []
+        clone.clear_updaters()
         self.reset_points()
         return self.add(clone)
 
@@ -4079,14 +4099,14 @@ class Mobject:
         match_center: bool = False,
         stretch: bool = False,
     ) -> Self:
-        """Make the mobject look like another, at once, while staying itself: the same
+        """Make the mobject another's value, at once, while staying itself: the same
         object in the scene, with its updaters.
 
-        The two families are first given the same structure; then each member takes its
-        counterpart's points and its colors, opacities, stroke widths, sheen and
-        texture (its joint and cap styles and 3D shading stay its own, unless they are
-        the same). With a `match_*` flag or `stretch`, a copy of `mobject` is first
-        fitted to this mobject.
+        It takes the other's points, shape and style, and its members', position by
+        position: a member stays itself where the other has one of its kind in its place,
+        and takes that one's value; the other's further members come as copies, without
+        updaters; its own further members go. The other is left as it is. With a
+        `match_*` flag or `stretch`, a copy of `mobject` is first fitted to this mobject.
 
         Args:
             mobject: The mobject to look like.
@@ -4121,21 +4141,33 @@ class Mobject:
                     mobject.rescale_to_fit(self.length_over_dim(dim), dim, stretch)
             if match_center:
                 mobject.move_to(self.get_center())
-        self.align_data(mobject, skip_point_alignment=True)
-        for sm1, sm2 in zip(self.get_family(), mobject.get_family(), strict=True):
-            sm1._geometry = sm2._geometry  # immutable: shared, not copied
-            sm1._take_shape(sm2)
-            a, b = sm1.paint, sm2.paint
-            # (the rest — colors, widths, windows, dashes — `mixed` takes from b at 1); a
-            # picture is what the mobject shows, so it becomes b's too (a texture is an array
-            # or a camera: compared by identity)
-            same = (a.joint, a.cap, a.shade_in_3d) == (b.joint, b.cap, b.shade_in_3d)
-            sm1.paint = (  # a value: shared, not copied
-                b
-                if same and a.texture is b.texture
-                else a.mixed(a, b, 1).but(texture=b.texture)
-            )
+        elif not {id(m) for m in self.get_family()}.isdisjoint(
+            id(m) for m in mobject.get_family()
+        ):  # sharing members (becoming its own member, say): it takes a copy's value
+            mobject = mobject.copy()
+        self._take(mobject)
         return self
+
+    def _take(self, other: "Mobject") -> None:
+        """Take another mobject's value (see [become][manimgx.Mobject.become])."""
+        theirs = other.submobjects
+        if other.has_points() and _kind(type(self)) is not _kind(type(other)):
+            # its kind can't hold the other's own shape: it holds it in a first member
+            self.reset_points()
+            theirs = [_fresh(other, alone=True), *theirs]
+        else:
+            self._geometry = other._geometry  # immutable values: shared, not copied
+            self._take_shape(other)
+        self.paint = other.paint
+        members: list[Mobject] = []
+        for i, sub in enumerate(theirs):
+            mine = self.submobjects[i] if i < len(self.submobjects) else None
+            if mine is not None and _kind(type(mine)) is _kind(type(sub)):
+                mine._take(sub)
+            else:
+                mine = _fresh(sub)
+            members.append(mine)
+        self.submobjects = members
 
     def match_points(self, mobject: "Mobject") -> Self:
         """Take another mobject's shape: its points, member by member in family order;
