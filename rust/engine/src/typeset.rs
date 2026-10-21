@@ -11,6 +11,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
+use icu_segmenter::options::LineBreakOptions;
+use icu_segmenter::{LineSegmenter, SentenceSegmenter};
 use typst::diag::{FileError, FileResult, Severity, SourceDiagnostic};
 use typst::foundations::{Bytes, Datetime, Duration};
 use typst::introspection::{Location, Tag};
@@ -744,6 +746,27 @@ pub fn graphemes(text: &str) -> Vec<usize> {
             let at = chars;
             chars += g.chars().count();
             at
+        })
+        .collect()
+}
+
+/// Where Unicode lets `text` break, in characters from 0 to its length: where a line may break
+/// (UAX #14, by the segmenter Typst breaks lines with, which finds the words of Thai and the
+/// scripts like it by a model of them), and where a sentence ends (UAX #29).
+pub fn segments(text: &str) -> (Vec<usize>, Vec<usize>) {
+    let lines = LineSegmenter::new_lstm(LineBreakOptions::default());
+    let sentences = SentenceSegmenter::new(Default::default());
+    (in_characters(text, lines.segment_str(text)), in_characters(text, sentences.segment_str(text)))
+}
+
+/// Offsets into `text` in bytes, in order, as offsets in characters.
+fn in_characters(text: &str, bytes: impl Iterator<Item = usize>) -> Vec<usize> {
+    let (mut at, mut chars) = (0, 0);
+    bytes
+        .map(|byte| {
+            chars += text[at..byte].chars().count();
+            at = byte;
+            chars
         })
         .collect()
 }

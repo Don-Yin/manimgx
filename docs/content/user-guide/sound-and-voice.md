@@ -62,7 +62,9 @@ class Derivative(m.Scene):
 Each animation starts with the first of its words. The scene waits until the line ends,
 so lines don't overlap. If you change the words, the animations follow the new words.
 
-Brackets come in pairs and don't nest; any other bracket is an error.
+Brackets come in pairs and don't nest; any other bracket is an error. Text written without
+spaces works the same: a span can start on any Chinese or Japanese character, or any Thai
+word, so `这是一个[圆]。` starts the animation on 圆.
 
 ## Voices
 

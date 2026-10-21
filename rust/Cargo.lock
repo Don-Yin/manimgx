@@ -2078,6 +2078,7 @@ dependencies = [
  "dirs 7.0.0",
  "dxc",
  "ffmpeg",
+ "icu_segmenter",
  "js-sys",
  "libc",
  "memmap2",

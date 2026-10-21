@@ -268,6 +268,10 @@ def ligature_carets(key: int) -> list[float]:
 def graphemes(text: str) -> list[int]:
     """Where `text`'s graphemes start, in characters."""
 
+def segments(text: str) -> tuple[list[int], list[int]]:
+    """Where Unicode lets `text` break, in characters from 0 to its length: where a line may
+    break (UAX #14) and where a sentence ends (UAX #29)."""
+
 def mitex_math(latex: str) -> str:
     """LaTeX math as Typst math (mitex); raises TypstError on what it can't convert."""
 

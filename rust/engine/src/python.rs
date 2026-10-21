@@ -431,6 +431,13 @@ mod typesetting {
         core::graphemes(text)
     }
 
+    /// Where Unicode lets `text` break, in characters from 0 to its length: where a line may
+    /// break (UAX #14) and where a sentence ends (UAX #29).
+    #[pyfunction]
+    pub(super) fn segments(text: &str) -> (Vec<usize>, Vec<usize>) {
+        core::segments(text)
+    }
+
     /// LaTeX math as Typst math (mitex's conversion; its default command spec).
     #[pyfunction]
     pub(super) fn mitex_math(latex: &str) -> PyResult<String> {
@@ -543,6 +550,7 @@ fn _engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m.add_function(wrap_pyfunction!(glyph_outlines, m)?)?;
         m.add_function(wrap_pyfunction!(ligature_carets, m)?)?;
         m.add_function(wrap_pyfunction!(graphemes, m)?)?;
+        m.add_function(wrap_pyfunction!(segments, m)?)?;
         m.add_function(wrap_pyfunction!(mitex_math, m)?)?;
         m.add_function(wrap_pyfunction!(mitex_text, m)?)?;
         m.add_function(wrap_pyfunction!(system_fonts_fingerprint, m)?)?;

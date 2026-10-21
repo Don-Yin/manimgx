@@ -20,7 +20,7 @@ default = ["python", "render", "export", "typeset", "window"]
 python = ["dep:pyo3", "dep:ffmpeg", "dep:wasm-bindgen-cli-support", "dep:zstd"]
 render = ["dep:wgpu", "dep:ash", "dep:libc", "dep:dxc", "dep:windows-sys"]
 export = ["render", "dep:rusty_aac", "dep:x264"]
-typeset = ["dep:typst", "dep:typst-kit", "dep:typst-layout", "dep:ttf-parser", "dep:unicode-segmentation", "dep:mitex", "dep:mitex-spec-gen", "dep:bincode", "dep:memmap2", "dep:dirs"]
+typeset = ["dep:typst", "dep:typst-kit", "dep:typst-layout", "dep:ttf-parser", "dep:unicode-segmentation", "dep:icu_segmenter", "dep:mitex", "dep:mitex-spec-gen", "dep:bincode", "dep:memmap2", "dep:dirs"]
 # the player (src/player.rs): takes played on a clock, with a face and a sound, on any screen
 player = ["render", "dep:ruzstd", "dep:serde", "dep:serde_json", "dep:rustybuzz", "dep:ttf-parser", "dep:unicode-bidi", "dep:unicode-segmentation", "dep:web-time"]
 window = ["python", "typeset", "player", "dep:winit", "dep:cpal"]
@@ -37,6 +37,7 @@ typst-kit = { version = "0.15.1", default-features = false, features = ["embedde
 typst-layout = { version = "0.15.1", optional = true }
 ttf-parser = { version = "0.25.1", optional = true }  # glyph outlines and ligature carets, from the fonts Typst loaded
 unicode-segmentation = { version = "1.12", optional = true }  # graphemes: the characters a ligature's colors divide
+icu_segmenter = { version = "2.3", optional = true }  # where text breaks, by the segmenter Typst breaks lines with
 bincode = { version = "1.3", optional = true }  # the system fonts' scan, cached on disk
 memmap2 = { version = "0.9", optional = true }  # system fonts mapped, not read whole (a CJK font is 60 MB)
 dirs = { version = "7", optional = true }  # the current user's cache directory

@@ -1,7 +1,9 @@
 """Sound placement and edits, and speech timing, captions and voices."""
 
 import re
+import unicodedata
 from fractions import Fraction
+from itertools import pairwise
 from pathlib import Path
 from typing import cast
 
@@ -19,6 +21,7 @@ from manimgx.audio.sound import (
     Clip,
     Speech,
     Word,
+    _pieces,
     cached,
     estimate,
     lines,
@@ -388,6 +391,19 @@ def said(text: str) -> Speech:
     return Speech(samples, text=text, words=words, rate=RATE)
 
 
+def untimed(text: str) -> Speech:
+    """A voice that takes 0.25 s a character and times none: its words are estimated."""
+    return Speech(
+        np.full(round(len(text) / 4 * RATE), 0.1, np.float32), text=text, rate=RATE
+    )
+
+
+def spelled(text: str) -> Speech:
+    """A voice that takes 0.25 s a character and times each one: Chinese or Japanese, say."""
+    pieces = [(c, i / 4, (i + 1) / 4) for i, c in enumerate(text)]
+    return Speech(untimed(text).source, text=text, words=timed(text, pieces), rate=RATE)
+
+
 @pytest.fixture
 def cache_here(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr("manimgx.scene._voice_folder", lambda scene: tmp_path / "voice")
@@ -523,6 +539,26 @@ class TestSay:
             Refused().render()
         assert said_texts == []
         assert not cache_here.exists()
+
+    @pytest.mark.parametrize("speaker", [spelled, untimed], ids=["timed", "estimated"])
+    def test_an_animation_starts_on_its_character_in_text_without_spaces(
+        self, speaker: voices.Voice
+    ) -> None:
+        begun: list[Fraction] = []
+        spoken: list[Speech] = []
+
+        class Say(m.Scene):
+            voice = staticmethod(speaker)
+
+            def construct(self) -> None:
+                self.wait(0.37)  # between frames
+                spoken.append(self.say("这是一个[圆]。", Begun(begun)))
+
+        Say().render()
+        (speech,) = spoken
+        start = float(begun[0]) - 0.37
+        assert start == pytest.approx(speech.words[4].start)  # on 圆, not the sentence
+        assert 0.6 < start < 1.2  # (said from 1.0 s, at 0.25 s a character)
 
 
 @pytest.mark.usefixtures("cache_here")
@@ -676,17 +712,134 @@ class TestWords:
     def test_other_letters_are_not_the_words(self) -> None:
         assert timed("2x", [("two", 0, 0.3), ("x", 0.3, 0.5)]) == ()
 
+    @pytest.mark.parametrize(
+        ("text", "words"),
+        [
+            ("Here is a circle.", ["Here", "is", "a", "circle."]),
+            ("forty-two and/or 3.14", ["forty-", "two", "and/", "or", "3.14"]),
+            ("10\u00a0km away", ["10\u00a0km", "away"]),
+            ("这是一个圆。", ["这", "是", "一", "个", "圆。"]),
+            ("「はい」。コーヒー", ["「は", "い」。", "コー", "ヒー"]),
+            (
+                "使用 Python 编写,第1章",
+                ["使", "用", "Python", "编", "写,", "第", "1", "章"],
+            ),
+            ("วันนี้เราจะเรียน", ["วัน", "นี้", "เรา", "จะ", "เรียน"]),
+        ],
+        ids=[
+            "English",
+            "hyphen and slash",
+            "no-break space",
+            "Chinese",
+            "Japanese",
+            "mixed",
+            "Thai",
+        ],
+    )
+    def test_the_words_are_the_pieces_unicode_breaks_a_line_into(
+        self, text: str, words: list[str]
+    ) -> None:
+        """A word goes up to where a line may break: after a space (not a no-break space), a
+        hyphen or a slash; between two Chinese or Japanese characters, each with the marks that go with it (an
+        opening bracket with the one after it, any other mark and ー with the one before);
+        between two Thai words."""
+        speech = Speech(np.full(RATE, 0.1, np.float32), text=text, rate=RATE)
+        assert [w.text for w in speech.words] == words
+
+    @pytest.mark.parametrize(
+        ("script", "when"),
+        [
+            ("这是一个[圆]。", (1.0, 1.25)),
+            ("这是[一个圆]。", (0.5, 1.25)),
+            ("ここに[円]があります。", (0.75, 1.0)),
+            ("使用 [Python] 编写", (0.75, 2.25)),
+            ("เราจะเรียน[แคลคูลัส]", (2.5, 4.5)),
+        ],
+        ids=["one character", "three", "Japanese", "mixed", "Thai"],
+    )
+    def test_a_span_of_text_without_spaces_is_said_by_its_characters_or_words(
+        self, script: str, when: tuple[float, float]
+    ) -> None:
+        text, (span,) = spans(script)
+        assert times(spelled(text), span) == pytest.approx(when)
+
+    @given(data=st.data())
+    def test_a_span_is_said_when_the_pieces_it_touches_are_whatever_their_grain(
+        self, data: st.DataObject
+    ) -> None:
+        """A voice cuts its text as it likes (words, characters, phrases, or all of it, as an
+        old cache did for text without spaces): a span is said from the start of the first
+        piece it touches to the end of the last."""
+        text = data.draw(st.text("ab 这是。\n", min_size=2, max_size=16))
+        cuts = data.draw(st.sets(st.integers(1, len(text) - 1)))
+        pieces = list(pairwise([0, *sorted(cuts), len(text)]))
+        n = 2 * len(pieces)
+        stamps = sorted(data.draw(st.lists(st.floats(0, 9), min_size=n, max_size=n)))
+        words = [
+            Word(text[a:b], stamps[2 * i], stamps[2 * i + 1])
+            for i, (a, b) in enumerate(pieces)
+        ]
+        begin = data.draw(st.integers(0, len(text) - 1))
+        end = data.draw(st.integers(begin + 1, len(text)))
+        touched = [w for w, (a, b) in zip(words, pieces) if a < end and b > begin]
+        speech = Speech(np.zeros(RATE, np.float32), text=text, words=words, rate=RATE)
+        assert times(speech, (begin, end)) == (touched[0].start, touched[-1].end)
+
+    def test_a_trim_leaves_the_places_of_the_words_it_keeps(self) -> None:
+        speech = said("one two three four")  # three is said from 0.4 s, four from 0.7 s
+        assert times(speech.trim(0.3), (8, 18)) == pytest.approx((0.1, 0.6))
+
+    @pytest.mark.parametrize(
+        "words",
+        [
+            [Word("I", 0, 0.1), Word("have", 0.1, 0.3), Word("two", 0.3, 0.5)],
+            [Word("have", 0, 0.2), Word("I", 0.2, 0.3)],
+        ],
+        ids=["spelled otherwise", "out of order"],
+    )
+    def test_words_that_are_not_the_pieces_of_the_text_in_order_are_refused(
+        self, words: list[Word]
+    ) -> None:
+        with pytest.raises(ValueError, match="pieces of its text, in order"):
+            Speech(
+                np.zeros(RATE, np.float32),
+                text="I have 2 apples.",
+                words=words,
+                rate=RATE,
+            )
+
+    @pytest.mark.parametrize(
+        ("span", "when"),
+        [
+            ((3, 3), 0.2),  # between words: where the next is said
+            ((5, 5), 0.2),  # inside a word: where it is said from
+            ((11, 11), 0.55),  # after them all: where the last has been said
+            ((3, 4), 0.2),  # of nothing but a space: as empty
+        ],
+    )
+    def test_a_span_with_no_word_starts_where_it_stands(
+        self, span: tuple[int, int], when: float
+    ) -> None:
+        # of is said from 0.2 s, text from 0.35 s to 0.55 s
+        speech = said("end of text")
+        assert times(speech, span) == (pytest.approx(when), pytest.approx(when))
+
     @given(
         words=st.lists(
-            st.builds(
-                str.__add__,
-                st.text("aé世", min_size=1, max_size=6),
-                st.sampled_from(["", ",", ".", "!", "?", ":", ";"]),
+            st.one_of(
+                st.builds(
+                    str.__add__,
+                    st.text("aé", min_size=1, max_size=6),
+                    st.sampled_from(["", ",", ".", "!", "?", ":", ";"]),
+                ),
+                st.sampled_from("世あ"),  # a character of Chinese or Japanese: a word
             ),
             min_size=1,
             max_size=8,
         ),
-        separator=st.sampled_from([" ", "\t\n", "\u00a0", "\u2003"]),
+        separator=st.sampled_from(
+            [" ", "\t\n", "\u3000", "\u2003"]
+        ),  # a line breaks there
         hops=st.tuples(st.integers(0, 20), st.integers(0, 60), st.integers(0, 20)),
         rest=st.integers(0, HOP - 1),
         loud_rest=st.booleans(),
@@ -770,3 +923,45 @@ class TestWords:
             "One two.",
             "Three four five.",
         ]
+
+    def test_captions_are_the_text_as_it_is_written(self) -> None:
+        speech = spelled("这是一个圆！使用 Python 编写,第1章。")
+        assert [text for _, _, text in lines(speech)] == [
+            "这是一个圆！",
+            "使用 Python 编写,第1章。",
+        ]
+        # a line is 42 columns wide, and a Chinese character takes two
+        assert [len(text) for _, _, text in lines(spelled("一" * 50))] == [21, 21, 8]
+
+    def test_a_caption_never_starts_with_a_closing_mark(self) -> None:
+        assert [text for _, _, text in lines(spelled("一" * 41 + "，二二二。"))] == [
+            "一" * 21,
+            "一" * 20 + "，",
+            "二二二。",
+        ]
+
+    @pytest.mark.parametrize(
+        ("text", "captions"),
+        [
+            ('He said "Hello." She left.', ['He said "Hello."', "She left."]),
+            ("「はい」。「いいえ」。", ["「はい」。", "「いいえ」。"]),
+        ],
+        ids=["English", "Japanese"],
+    )
+    def test_a_quoted_sentence_ends_its_caption(
+        self, text: str, captions: list[str]
+    ) -> None:
+        assert [caption for _, _, caption in lines(spelled(text))] == captions
+
+    @given(st.text("a b这是。！？\n\t", min_size=1, max_size=120))
+    def test_captions_keep_the_text_its_order_and_its_spaces(self, text: str) -> None:
+        speech = Speech(np.full(RATE, 0.1, np.float32), text=text, rate=RATE)
+        captions = [caption for _, _, caption in lines(speech)]
+        assert "".join("".join(c.split()) for c in captions) == "".join(text.split())
+        assert all(c in " ".join(text.split()) for c in captions)  # spaced as it is
+        wide = [
+            c
+            for c in captions
+            if sum(1 + (unicodedata.east_asian_width(x) in "WF") for x in c) > 42
+        ]
+        assert all(len(_pieces(c)) == 1 for c in wide)  # unless it can't break

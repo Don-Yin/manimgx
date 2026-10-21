@@ -175,6 +175,25 @@ class TestTiming:
             ("you", pytest.approx(0.03), pytest.approx(0.06)),
         )
 
+    def test_elevenlabs_alignment_times_each_chinese_character(
+        self, service: Service
+    ) -> None:
+        text = "这是一个圆。"
+        service.reply = {
+            "timestamps": [
+                {
+                    "characters": list(text),
+                    "character_start_times_seconds": [i / 10 for i in range(len(text))],
+                    "character_end_times_seconds": [
+                        (i + 1) / 10 for i in range(len(text))
+                    ],
+                }
+            ]
+        }
+        words = Fal()(text).words
+        assert [w.text for w in words] == ["这", "是", "一", "个", "圆。"]
+        assert words[4].start == pytest.approx(0.4)  # 圆's own time, kept
+
     def test_timed_words_time_the_words(self, service: Service) -> None:
         items = [
             {"text": "hi", "start": 0.0, "end": 0.02},

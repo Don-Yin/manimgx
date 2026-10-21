@@ -4,9 +4,11 @@ import dataclasses
 import marshal
 import math
 import os
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from fractions import Fraction
+from itertools import pairwise
 from pathlib import Path
 from types import CodeType
 from typing import TYPE_CHECKING, ClassVar, Self
@@ -348,7 +350,9 @@ def _ducked(clips: list[Clip], decibels: float, at: int, length: int) -> np.ndar
 @dataclass(frozen=True, slots=True)
 class Word:
     """A word of a speech, and when it is said: from `start` to `end`, in seconds from the
-    speech's start."""
+    speech's start. The words of a speech are pieces of its text, in order: those Unicode lets
+    a line break between (a word, a Chinese or Japanese character, a Thai word, each with the
+    marks that go with it), unless its voice gives its own."""
 
     text: str
     start: float
@@ -364,8 +368,8 @@ class Speech(Sound):
     Args:
         source: The audio: a file's path, a file's bytes, or samples.
         text: What it says.
-        words: Each word and when it is said, if the voice knows; otherwise they are
-            estimated from the audio.
+        words: Each word and when it is said, if the voice knows ([`timed`][manimgx.audio.timed]
+            makes them from a voice's own timing); otherwise they are estimated from the audio.
         rate: The samples' rate; only for samples.
     """
 
@@ -382,6 +386,8 @@ class Speech(Sound):
         super().__init__(source, rate=rate)
         self.text = text
         self._words = tuple(words)  # the source's: before trims and speed
+        if self._words:
+            _located(self)  # refuses words that are not pieces of the text
 
     @property
     def words(self) -> tuple[Word, ...]:
@@ -409,14 +415,33 @@ text-to-speech: wrap its call in a function that returns `Speech(audio, text=tex
 # ── timing ───────────────────────────────────────────────────────────────────────────────
 
 
-_WORD = re.compile(r"\S+")
+def _pieces(text: str) -> list[tuple[int, int, bool]]:
+    """The pieces a text is timed and shown in: what lies between two places Unicode lets a
+    line break, without its spaces (a word, a Chinese or Japanese character, a Thai word, each
+    with the marks that go with it), as the characters (begin, end) it spells, and whether a
+    sentence ends with it. An opening bracket or quote that the end of a sentence takes with it
+    (`。「`) begins the next sentence, as it begins the next line."""
+    from manimgx._engine import segments
+
+    breaks, sentences = segments(text)
+    ends = set()
+    for end in sentences:
+        while end and unicodedata.category(text[end - 1]) in ("Ps", "Pi"):
+            end -= 1
+        ends.add(end)
+    pieces = []
+    for a, b in pairwise(breaks):
+        if piece := text[a:b].strip():
+            begin = text.index(piece, a)
+            pieces.append((begin, begin + len(piece), b in ends))
+    return pieces
 
 
 def estimate(text: str, samples: np.ndarray) -> tuple[Word, ...]:
     """When each word of `text` is said in `samples`, estimated: the audio's voiced span
     shared among the words by their letters, with a share more for the pause after a comma or
     a full stop."""
-    words = _WORD.findall(text)
+    words = [text[a:b] for a, b, _ in _pieces(text)]
     if not words:
         return ()
     level = np.abs(samples).max(axis=1) if samples.ndim > 1 else np.abs(samples)
@@ -449,24 +474,50 @@ def estimate(text: str, samples: np.ndarray) -> tuple[Word, ...]:
     )
 
 
+def _located(speech: Speech) -> list[tuple[int, int]]:
+    """Where each word of a speech is in its text, as the characters (begin, end) it spells.
+    The words are pieces of the text, in order: each is found after the one before."""
+    text, at, found = speech.text, 0, []
+    for word in speech.words:
+        begin = text.find(word.text, at)
+        if begin < 0:
+            raise ValueError(
+                f"the word {word.text!r} is not in {text!r} after character {at}: a"
+                " speech's words are pieces of its text, in order"
+            )
+        at = begin + len(word.text)
+        found.append((begin, at))
+    return found
+
+
+def _columns(text: str) -> int:
+    """How wide a text is shown, in columns: its spaces as one, and a wide character (Chinese,
+    Japanese, Korean) as two."""
+    return sum(
+        1 + (unicodedata.east_asian_width(c) in "WF") for c in " ".join(text.split())
+    )
+
+
 @deprecated("ManimGX's machinery: the captions call it", category=None)
 def lines(speech: Speech, width: int = 42) -> list[tuple[float, float, str]]:
-    """A speech as captions: its words in lines of at most `width` characters, a line ending
-    at the end of a sentence, each shown from its first word's start until the next line's
-    (or its last word's end), in seconds from the speech's start."""
-    out: list[tuple[float, float, str]] = []
-    line: list[Word] = []
-    for word in speech.words:
-        if line and len(" ".join(w.text for w in line)) + 1 + len(word.text) > width:
-            out.append((line[0].start, word.start, " ".join(w.text for w in line)))
-            line = []
-        line.append(word)
-        if word.text[-1] in ".!?":
-            out.append((line[0].start, word.end, " ".join(w.text for w in line)))
-            line = []
-    if line:
-        out.append((line[0].start, line[-1].end, " ".join(w.text for w in line)))
-    return out
+    """A speech as captions: its text in lines at most `width` columns wide (a Chinese or
+    Japanese character takes two), broken where Unicode lets a line break, a line ending where
+    a sentence does. A line is shown from when it begins to be said until the next one does,
+    or, ending a sentence, until it has been said; in seconds from the speech's start."""
+    text = speech.text
+    # each line's characters, and whether a sentence ends it
+    cut: list[tuple[int, int, bool]] = []
+    for a, b, ends in _pieces(text):
+        if cut and not cut[-1][2] and _columns(text[cut[-1][0] : b]) <= width:
+            cut[-1] = (cut[-1][0], b, ends)
+        else:
+            cut.append((a, b, ends))
+    said = [times(speech, (a, b)) for a, b, _ in cut]
+    shown = []
+    for k, ((a, b, ends), (start, end)) in enumerate(zip(cut, said, strict=True)):
+        until = end if ends or k + 1 == len(cut) else said[k + 1][0]
+        shown.append((start, until, " ".join(text[a:b].split())))
+    return shown
 
 
 # ── the script: [spans] in the text ─────────────────────────────────────────────────────
@@ -499,18 +550,16 @@ def spans(script: str) -> tuple[str, list[tuple[int, int]]]:
 @deprecated("ManimGX's machinery: say calls it", category=None)
 def times(speech: Speech, span: tuple[int, int]) -> tuple[float, float]:
     """When the characters `span` of a speech's text are said: from the start of its first
-    word to the end of its last; an empty span, the start of the word it comes before.
-    """
+    word to the end of its last; an empty span, the start of the word it comes before (the
+    end of the last, if it comes after them all)."""
     begin, end = span
-    words = speech.words
-    located = [(m.start(), m.end()) for m in _WORD.finditer(speech.text)]
-    inside = [i for i, (a, b) in enumerate(located) if a < end and b > begin] or [
-        next((i for i, (a, _) in enumerate(located) if a >= begin), len(words) - 1)
-    ]
-    first, last = inside[0], inside[-1]
-    if begin == end:
-        return words[first].start, words[first].start
-    return words[first].start, words[last].end
+    words, places = speech.words, _located(speech)
+    inside = [w for w, (a, b) in zip(words, places) if a < end and b > begin]
+    if begin < end and inside:
+        return inside[0].start, inside[-1].end
+    ahead = (w.start for w, (_, b) in zip(words, places) if b > begin)
+    start = next(ahead, words[-1].end)
+    return start, start
 
 
 # ── the cache: what a voice said, kept ──────────────────────────────────────────────────
@@ -682,12 +731,12 @@ def timed(text: str, pieces: Sequence[tuple[str, float, float]]) -> tuple[Word, 
     if not letters or letters != spelled:
         return ()
     words, k = [], 0
-    for m in _WORD.finditer(text):
-        n = sum(c.isalnum() for c in m.group())
+    for a, b, _ in _pieces(text):
+        n = sum(c.isalnum() for c in text[a:b])
         if n:
-            words.append(Word(m.group(), owner[k][0], owner[k + n - 1][1]))
+            words.append(Word(text[a:b], owner[k][0], owner[k + n - 1][1]))
             k += n
         else:  # punctuation: beside the preceding word, or the first following word
             at = words[-1].end if words else owner[0][0]
-            words.append(Word(m.group(), at, at))
+            words.append(Word(text[a:b], at, at))
     return tuple(words)

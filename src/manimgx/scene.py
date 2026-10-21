@@ -1612,7 +1612,9 @@ class Scene:
         lasting as long as they take to say, or its own run time if that is longer (an
         empty `[]` starts one where it stands). Without brackets, the animations play
         during the whole speech. The brackets are not spoken: a span is one `[` and its
-        `]`, so a nested, unclosed or stray bracket is an error (a ValueError).
+        `]`, so a nested, unclosed or stray bracket is an error (a ValueError). Text is
+        timed in the pieces Unicode lets a line break between, so in text written without
+        spaces a span can start on any Chinese or Japanese character, or any Thai word.
 
         Args:
             script: What to say, with a bracketed span for each animation (or none).
