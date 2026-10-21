@@ -198,7 +198,6 @@ pytest_add_cli_args = ["-p", "no:randomly", "--hypothesis-profile=mutation"]
 
 [tool.coverage.run]
 # Bind coverage to the installed product's directory, including its subprocesses.
-# A frozen reference has the same import name but is not the code under test.
 # Reporting defaults to the checkout after the platform paths have been combined.
 source = ["${MANIMGX_COVERAGE_SOURCE-src/manimgx}"]
 patch = ["subprocess"]

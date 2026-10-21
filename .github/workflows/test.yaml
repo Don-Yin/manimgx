@@ -146,6 +146,11 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-26, windows-2025]
         python-version: ["3.13", "3.14"]
+        # The corpus's references are drawn on a Mac: one job holds ManimGX to them.
+        include:
+          - os: macos-26
+            python-version: "3.14"
+            corpus: true
     runs-on: ${{ matrix.os }}
     # Leave room for software GPU throughput; individual tests have their own watchdog.
     timeout-minutes: 180
@@ -193,16 +198,9 @@ jobs:
         id: runtime
         run: uv run --frozen --no-sync python -m scripts.release.smoke_test
 
-      - name: Acquire the latest stable release for corpus comparison
-        run: uv run --frozen --no-sync python -m tests.integration.corpus.release .cache/corpus/release.json
-        env:
-          GH_TOKEN: ${{ github.token }}
-
       - name: Test
         if: ${{ !cancelled() && steps.runtime.outcome == 'success' }}
-        run: just test-coverage -v
-        env:
-          MANIMGX_CORPUS_RELEASE: .cache/corpus/release.json
+        run: just test-coverage -v ${{ !matrix.corpus && '--ignore=tests/integration/test_corpus.py' || '' }}
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
@@ -217,10 +215,7 @@ jobs:
         if: ${{ !cancelled() }}
         with:
           name: rendering-${{ matrix.os }}-python${{ matrix.python-version }}
-          path: |
-            tests/integration/_diffs/
-            .cache/corpus/release.json
-          include-hidden-files: true
+          path: tests/integration/_diffs/
           if-no-files-found: ignore
           retention-days: 7
 

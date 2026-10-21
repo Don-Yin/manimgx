@@ -5,8 +5,10 @@ A case is a directory under `cases/`:
 - `scene.py`: the only source. It is Manim CE's code, and it reaches the engine only through
   `manimgx`'s top level (and its types, `manimgx.typing`): ManimGX runs it as written, and CE
   runs the same bytes with `manimgx` resolving to `manim` (`run_ce.py`).
-- `manimgx.mkv`, `ce.mkv`: each engine's lossless frames, generated locally and ignored by Git.
-- `manimgx.mkv.sha256`, `ce.mkv.sha256`: hashes of the reviewed reference videos.
+- `manimgx.mkv`: ManimGX's reference, in lossless video: the film the facts record, and a
+  review was given for. `test_regression` holds today's ManimGX to it.
+- `ce.mkv`: CE's frames, in lossless video, rendered locally and ignored by Git; its
+  `ce.mkv.sha256` identifies the video the case was reviewed with.
 - `case.json`: facts, written by the tool — the source both renders came from, every frame's
   hash (so a change is found without decoding video), and how the two compare, frame by frame,
   in every metric.
@@ -110,6 +112,15 @@ class Frames:
     def times(self, fps: int) -> list[Fraction]:
         dt = Fraction(1, fps)
         return [start + j * dt for start, n in self.timeline for j in range(n)]
+
+    def timed_like(self, other: "Frames") -> bool:
+        """Whether another film shows as many frames, at the same scene times, and lasts as
+        long."""
+        return (self.count, self.timeline, self.duration) == (
+            other.count,
+            other.timeline,
+            other.duration,
+        )
 
     def identity(self, size: tuple[int, int], fps: int) -> str:
         """One hash for the render's pixel sequence and resolution."""
@@ -228,8 +239,9 @@ class Case:
     def video(self, engine: Engine) -> Path:
         return self.dir / f"{engine}.mkv"
 
-    def video_hash(self, engine: Engine) -> Path:
-        return self.dir / f"{engine}.mkv.sha256"
+    @property
+    def ce_hash(self) -> Path:
+        return self.dir / "ce.mkv.sha256"
 
     @property
     def facts_path(self) -> Path:

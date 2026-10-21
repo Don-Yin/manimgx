@@ -1,8 +1,13 @@
 """The corpus's tools hold to their rules.
 
-- A stored ManimGX film is a baseline whatever CE did and however the case was reviewed:
-  `test_regression` fails when its frozen package and today's film differ on the same host,
-  and never skips; the first comparison supplies the diagnostics without another render.
+- A case's ManimGX reference holds whatever CE did and however the case was reviewed:
+  `test_regression` fails when today's film looks different from it, shows its frames at
+  other times or exports fewer, and never skips; the first comparison supplies the evidence
+  without another render. A scene whose pixels a machine's arithmetic decides is held to all
+  but its pixels.
+- Rendering keeps a reference while its frames look the same and keep their times, and
+  replaces it when they don't, or when its video is not the film its facts record. A render
+  whose facts can't be completed changes nothing in the case.
 - A type report's imprecision is ManimGX's: an untyped value from another package is not
   ManimGX's output, but ManimGX's outputs stay imprecise however untyped their inputs, each
   named by the call or attribute it comes from (a generic class's inherited methods too).
@@ -11,7 +16,6 @@
   (nor is its type ManimGX's imprecision).
 """
 
-import hashlib
 import json
 import os
 import signal
@@ -24,14 +28,7 @@ from pathlib import Path
 
 import pytest
 from tests.integration import test_corpus as corpus
-from tests.integration.corpus import (
-    baseline,
-    case,
-    engines,
-    references,
-    release,
-    typecheck,
-)
+from tests.integration.corpus import case, engines, references, typecheck
 from tests.integration.corpus.__main__ import leaks
 from tests.integration.corpus.case import (
     FPS,
@@ -44,7 +41,7 @@ from tests.integration.corpus.case import (
     Frames,
     frames_to_json,
 )
-from tests.integration.corpus.frozen import Difference
+from tests.integration.corpus.frames import Difference, Recorder
 from tests.typecheck import check
 
 STORED = Frames((("before", 2),), Fraction(1, 5), ((Fraction(0), 2),))
@@ -199,56 +196,83 @@ def test_leaks_compares_current_isolated_and_sequential_processes(
     ]
 
 
+def film(path: Path, levels: list[int]) -> Frames:
+    """A film of flat grey frames, one per level, written to `path`; its facts."""
+    width, height = SIZE
+    pictures = [bytes([level]) * (width * height * 3) for level in levels]
+    recorder = Recorder(SIZE, FPS, path, compact=False)
+    for picture in pictures:
+        recorder.add(picture)
+    return Frames(
+        recorder.close(), Fraction(len(levels), FPS), ((Fraction(0), len(levels)),)
+    )
+
+
 @pytest.mark.usefixtures("cases")
 @pytest.mark.parametrize(
     "state",
-    ["missing movie", "corrupt movie", "missing checksum", "wrong checksum", "valid"],
+    [
+        "unchanged",
+        "looks the same",
+        "looks different",
+        "retimed",
+        "a broken reference",
+        "no reference",
+    ],
 )
-def test_recreated_movie_checksum_binds_its_actual_container_bytes(
-    state: str,
-    monkeypatch: pytest.MonkeyPatch,
+def test_rendering_keeps_a_reference_while_it_looks_the_same(
+    state: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    example = made("recreated", "import manimgx\n")
-    example.write_facts(
-        Facts(
-            example.source_hash(), SIZE, FPS, STORED, Failure("unavailable"), "", None
-        )
-    )
-    example.video_hash("manimgx").write_text(
-        f"{hashlib.sha256(b'original encoding').hexdigest()}  manimgx.mkv\n",
-        encoding="ascii",
-    )
-    example.video("manimgx").write_bytes(b"original encoding")
-    anchor = baseline.Anchor.capture(example, "0" * 64)
-    if state == "missing movie":
+    example = made("rendered", "import manimgx\n")
+    reference = film(example.video("manimgx"), [10, 10])
+    if state == "a broken reference":
+        film(example.video("manimgx"), [10, 99])  # not the film its facts record
+    elif state == "no reference":
         example.video("manimgx").unlink()
-    elif state == "corrupt movie":
-        example.video("manimgx").write_bytes(b"damaged container")
-    elif state == "missing checksum":
-        example.video_hash("manimgx").unlink()
-    elif state == "wrong checksum":
-        example.video_hash("manimgx").write_text(
-            "incorrect checksum\n", encoding="ascii"
-        )
-    movie = b"identical decoded frames in a different lossless container"
+    kept = example.video("manimgx").read_bytes() if state != "no reference" else b""
+    example.write_facts(
+        Facts(example.source_hash(), SIZE, FPS, reference, Failure("no CE"), "", None)
+    )
+    levels = {"looks the same": [10, 12], "looks different": [10, 99]}.get(state)
+    levels = levels or ([10, 10, 10] if state == "retimed" else [10, 10])
 
     def render(_case: Case, _engine: str, *, video: Path) -> engines.Result:
-        video.write_bytes(movie)
-        return engines.Result(example.source_hash(), STORED)
+        return engines.Result(example.source_hash(), film(video, levels))
 
     monkeypatch.setattr(engines, "run", render)
-    facts, _ = references.render(example, {"manimgx"})
-    assert facts.manimgx == STORED
-    kept = b"original encoding" if state == "valid" else movie
-    assert example.video("manimgx").read_bytes() == kept
-    assert example.video_hash("manimgx").read_text(encoding="ascii") == (
-        f"{hashlib.sha256(kept).hexdigest()}  manimgx.mkv\n"
-    )
-    if state == "valid":
-        anchor.validate(example)
+    facts, notes = references.render(example, {"manimgx"})
+    if state in ("unchanged", "looks the same"):
+        assert facts.manimgx == reference
+        assert example.video("manimgx").read_bytes() == kept
+        assert notes == f"manimgx {state}"
     else:
-        with pytest.raises(ValueError, match="promote it explicitly"):
-            anchor.validate(example)
+        assert isinstance(facts.manimgx, Frames)
+        assert facts.manimgx.count == len(levels)
+        assert example.video("manimgx").read_bytes() != kept
+    assert example.facts() == facts
+
+
+@pytest.mark.usefixtures("cases")
+def test_a_render_that_cannot_complete_its_facts_changes_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ManimGX alone, where Manim's video was never rendered: its comparison can't be made
+    example = made("incomplete", "import manimgx\n")
+    reference = film(example.video("manimgx"), [10, 10])
+    before = example.video("manimgx").read_bytes()
+    example.write_facts(
+        Facts(example.source_hash(), SIZE, FPS, reference, STORED, "", None)
+    )
+    facts = example.facts()
+
+    def render(_case: Case, _engine: str, *, video: Path) -> engines.Result:
+        return engines.Result(example.source_hash(), film(video, [10, 99]))
+
+    monkeypatch.setattr(engines, "run", render)
+    with pytest.raises(FileNotFoundError, match="ce"):
+        references.render(example, {"manimgx"})
+    assert example.video("manimgx").read_bytes() == before
+    assert example.facts() == facts
 
 
 @pytest.mark.usefixtures("cases")
@@ -259,16 +283,7 @@ def test_render_evidence_keeps_the_original_complete_result(
     record = {
         "source": example.source_hash(),
         "render": frames_to_json(STORED),
-        "duration_exact": "1/5",
-        "adapter": {"backend": "test"},
-        "differences": [
-            {
-                "first": 201,
-                "repeat": 1,
-                "changed_pixels": 7,
-                "max_channel_difference": 255,
-            }
-        ],
+        "differences": [{"first": 201, "repeat": 1, "amount": 99.0}],
     }
 
     def render(
@@ -281,7 +296,7 @@ def test_render_evidence_keeps_the_original_complete_result(
     monkeypatch.setattr(subprocess, "run", render)
     log = tmp_path / "actual.log"
     result = engines.run(example, "manimgx", log=log)
-    assert result.duration == Fraction(1, 5)
+    assert result.differences == (Difference(201, 1, 99.0),)
     assert log.read_text(encoding="utf-8") == "original render log\n"
     assert (
         json.loads(log.with_suffix(".result.json").read_text(encoding="utf-8"))
@@ -290,12 +305,13 @@ def test_render_evidence_keeps_the_original_complete_result(
 
 
 @pytest.mark.usefixtures("cases")
+@pytest.mark.parametrize("name", ["held", next(iter(corpus.MACHINE_DEPENDENT))])
 @pytest.mark.parametrize("ce", ["same", "different", "failure"])
-@pytest.mark.parametrize("change", ["same", "pixels", "duration", "timeline"])
-def test_a_stored_film_holds_whatever_ce_did(
-    ce: str, change: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("change", ["none", "pixels", "duration", "timeline", "export"])
+def test_a_reference_holds_whatever_ce_did(
+    name: str, ce: str, change: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    example = made("baseline", "import manimgx\n")
+    example = made(name, "import manimgx\n")
     theirs = {"same": STORED, "different": replace(STORED, runs=(("ce", 2),))}
     error = 0.0 if ce == "same" else 255.0
     compared = Comparison(((0, 0, (error,) * len(METRICS)),), ())
@@ -307,40 +323,43 @@ def test_a_stored_film_holds_whatever_ce_did(
     monkeypatch.setattr(corpus, "DIFFS", output)
     calls = []
 
-    def compare(
-        _self: release.References, selected: Case, directory: Path
+    def render(
+        selected: Case, engine: str, *, compare: bool, log: Path, **_: object
     ) -> engines.Result:
-        assert selected == example
-        calls.append(selected)
-        directory.mkdir(parents=True)
-        (directory / "actual.log").write_text(
-            "first render's evidence", encoding="utf-8"
+        calls.append((selected, engine, compare))
+        log.write_text("first render's evidence", encoding="utf-8")
+        # another machine's pixels: what decides is whether they look the same
+        frames = replace(STORED, runs=(("other pixels", 2),))
+        if change == "duration":
+            frames = replace(frames, duration=Fraction(3, 10))
+        elif change == "timeline":
+            frames = replace(frames, timeline=((Fraction(0), 1), (Fraction(1, 2), 1)))
+        differences = (
+            (Difference(1, 1, 99.0),) if compare and change == "pixels" else ()
         )
-        # Host pixels may differ from the canonical movie. Only the frozen package's
-        # complete comparison on this same host decides pixel equality.
-        frames = replace(STORED, runs=(("host-specific", 2),))
-        differences = ()
-        if change == "pixels":
-            differences = (Difference(201, 1, 7, 255),)
-        elif change != "same":
-            frames = Failure(f"the candidate changed the reference {change}")
-        return engines.Result(example.source_hash(), frames, differences=differences)
+        exported = frames.count - (change == "export")
+        return engines.Result(
+            selected.source_hash(), frames, mp4_frames=exported, differences=differences
+        )
 
-    monkeypatch.setattr(release.References, "compare", compare)
-    references = release.References(None, tmp_path / "packages")
-    if change == "same":
-        corpus.test_regression(example, references)
+    monkeypatch.setattr(engines, "run", render)
+    compared_pixels = name not in corpus.MACHINE_DEPENDENT
+    failure = {
+        "pixels": "look different from its reference" if compared_pixels else None,
+        "duration": "frames over",
+        "timeline": "frames over",
+        "export": "exported MP4",
+    }.get(change)
+    if failure is None:
+        corpus.test_regression(example)
         assert not (output / example.name).exists()
     else:
-        match = (
-            "maximum RGB difference 255 at frame 201" if change == "pixels" else change
-        )
-        with pytest.raises(pytest.fail.Exception, match=match):
-            corpus.test_regression(example, references)
+        with pytest.raises(pytest.fail.Exception, match=failure):
+            corpus.test_regression(example)
         assert (output / example.name / "actual.log").read_text(encoding="utf-8") == (
             "first render's evidence"
         )
-    assert calls == [example]
+    assert calls == [(example, "manimgx", compared_pixels)]
 
 
 @pytest.mark.usefixtures("cases")

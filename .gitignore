@@ -42,6 +42,8 @@ media/
 *.wav
 *.storyboard*.png
 !tests/integration/cases/*/*.wav
+# (but for ManimGX's reference of each corpus case)
+!tests/integration/cases/*/manimgx.mkv
 tests/**/_testoutput/
 tests/**/_diffs/
 

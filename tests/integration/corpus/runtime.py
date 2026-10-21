@@ -66,6 +66,5 @@ def write_result(
         "size": list(SIZE),
         "fps": FPS,
         "render": frames_to_json(frames),
-        "duration_exact": str(frames.duration),
     }
     out.write_text(json.dumps(result | (extra or {})), encoding="utf-8")

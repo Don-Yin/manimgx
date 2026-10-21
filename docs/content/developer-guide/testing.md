@@ -34,11 +34,12 @@ you work, run the part your change touches. `pyproject.toml` puts the repository
 the path, so the tests import their own tools as `tests.integration.corpus`.
 
 The Test workflow runs the suite on every push to `main` and every pull request, on Linux,
-macOS and Windows, with Python 3.13 and 3.14 (see
+macOS and Windows, with Python 3.13 and 3.14. The corpus, whose references are drawn on a
+Mac, runs in one of those jobs: macOS with Python 3.14 (see
 [GitHub workflows](github-workflows.md#1-testyaml-the-checks-and-the-tests)).
-The nine benchmark films run on Linux and macOS. Windows still runs the functional
-corpus, native rendering tests, packaging checks and laws of work; its software GPU's
-cost on these long films is outside the performance gate.
+The nine benchmark films run on Linux and macOS. Windows still runs the native rendering
+tests, packaging checks and laws of work; its software GPU's cost on these long films is
+outside the performance gate.
 
 ## What the tests are
 
@@ -193,7 +194,10 @@ A case is a folder in
 
 - `scene.py`: the only source. It is Manim code, and it reaches the engine only through
   `import manimgx`. A file the scene reads (an SVG, a sound) sits beside it.
-- `manimgx.mkv` and `ce.mkv`: each engine's lossless frames, generated locally and ignored by Git. Their `.sha256` sidecars record the exact reviewed video files.
+- `manimgx.mkv`: ManimGX's reference, in lossless video: the film the facts record, which
+  ManimGX is held to.
+- `ce.mkv`: Manim's frames, in lossless video, rendered locally and ignored by Git; its
+  `.sha256` sidecar records the exact video the case was reviewed with.
 - `case.json`: the facts, written by the tools. The hash of the source both renders came
   from, the hash of every frame, and how the two engines' frames compare.
 - `review.json`, once a person has reviewed the case: their verdict and note, pinned to the
@@ -211,7 +215,7 @@ Both engines run the same bytes. ManimGX runs `scene.py` as it is. Manim runs it
 ([`run_ce.py`](https://github.com/academa-labs/manimgx/blob/main/tests/integration/corpus/run_ce.py)).
 Each render runs in a process of its own, with a fixed hash seed.
 
-A frame is identified by the hash of its pixels, and locally stored in lossless video (x264 in RGB, written and read with [PyAV](https://pyav.basswood-io.com), FFmpeg's libraries in a wheel). A video is rewritten only when its pixels change, so rendering an unchanged scene again changes no file. The committed `.sha256` sidecars identify each reviewed video without putting the video in clone history. The corpus renders at 960 × 540, 10 frames per second.
+A frame is identified by the hash of its pixels, and locally stored in lossless video (x264 in RGB, written and read with [PyAV](https://pyav.basswood-io.com), FFmpeg's libraries in a wheel). A video is rewritten only when its pixels change, so rendering an unchanged scene again changes no file. The corpus renders at 960 × 540, 10 frames per second.
 
 ### Comparing at the same scene time
 
@@ -257,22 +261,41 @@ checks every case three ways:
    checker (suppression comments, `Any`, `cast`, …), and no value that ManimGX leaves
    `Any` or `Unknown`
    ([`typecheck.py`](https://github.com/academa-labs/manimgx/blob/main/tests/integration/corpus/typecheck.py)).
-3. `test_regression`: the latest stable ManimGX release and today's package render the scene in separate fresh processes on the same host and adapter, using the same installed dependencies and fonts. Every RGB pixel, exact duration, timeline and frame count must agree, and the exported MP4 must contain every frame. This covers every case, including those that differ from Manim or await review. Before the first stable release, every scene is still rendered and its exported frame count is checked.
+3. `test_regression`: today's ManimGX renders the scene as its reference shows it: as many
+   frames, at the same scene times, each looking the same, and the exported MP4 holding
+   every one. This covers every case, including those that differ from Manim or await
+   review.
 
-CI resolves the latest stable GitHub release before testing and records its version and wheel SHA-256 identities in a manifest shared by the test workers. Downloads are verified before use. A published release without a compatible wheel, an invalid checksum or a failed download is an error; only the absence of a stable release enables the first-release bootstrap. Locally, the test fixture resolves the latest release, or reads the manifest named by `MANIMGX_CORPUS_RELEASE`.
+Two frames look the same when, blurred by a pixel (a Gaussian of sigma 1, as an eye blurs
+them), no channel of any pixel differs by more than 30 of 255
+([`frames.py`](https://github.com/academa-labs/manimgx/blob/main/tests/integration/corpus/frames.py)).
+Light that an edge moves into the next pixel cancels out, so how a GPU rounds an edge hardly
+counts: between an Apple GPU, a virtual machine's and a CPU rasterizer, the corpus differs by
+at most 28. A stroke moved by a pixel, a dot gone or a run of a thin line gone differ by 40
+and more. So a change that looks the same needs no new reference, and one that looks
+different needs a review. A scene whose pixels a machine's floating-point arithmetic decides
+(chaos parting two trajectories) is held to its frames' count and times and to its export,
+not to its pixels (`MACHINE_DEPENDENT`).
 
-Failures keep the release identity, reference movie, process logs and first differing frame pairs in `tests/integration/_diffs/<case>/`. Successful comparisons remove their transient films. No image tolerance is used for regression acceptance. A fresh clone needs the released package download, not archived corpus movies, to run these tests.
+The references are drawn on a Mac, and the Test workflow renders the corpus in one job, on
+macOS. Each frame is compared as it is drawn, and a reference video that is not the film its
+facts record fails. A failure keeps the render's log and its first differing frame pairs in
+`tests/integration/_diffs/<case>/`.
 
 ### Working with the corpus
 
 `test_corpus.py` only checks; `just corpus` renders and reviews. A reference changes only
 when a change means it to, and after someone has looked at the new frames.
 
-The review panel and `just corpus diff CASE` use local movies identified by the committed sidecars. Verify restored movies against those sidecars. To create new review movies, use `just corpus render CASE`; changed pixels update the local facts and require a new review before committing them.
+The review panel and `just corpus diff CASE` show the committed references and the local
+Manim movies. `just corpus render CASE` renders a case again: ManimGX's reference stays while
+its frames look the same and keep their times, and is replaced when they don't, which updates
+the facts and requires a new review before committing them.
 
-- **A new case** is a folder in `cases/` holding its `scene.py`. Render it with `just corpus render CASE`, which renders it in both engines and compares them; look at it (`just review`); and record your verdict with `just corpus review CASE working` (or `not_matching`, or `not_working`; `--note` says why). Commit the scene, facts, review and video hash sidecars; Git ignores the videos.
+- **A new case** is a folder in `cases/` holding its `scene.py`. Render it with `just corpus render CASE`, which renders it in both engines and compares them; look at it (`just review`); and record your verdict with `just corpus review CASE working` (or `not_matching`, or `not_working`; `--note` says why). Commit the scene, facts, review, ManimGX's reference and the sidecar of Manim's video, which Git ignores.
 - **A change that is meant to change how cases look** renders their references again with
-  `just corpus render CASE…`. A case's review is pinned to the renders it was given for,
+  `just corpus render CASE…`; those whose frames no longer look the same get new ones. A
+  case's review is pinned to the renders it was given for,
   so it no longer speaks for the new ones: look at the new frames before you commit them,
   and renew the verdict (in the review panel, or with `just corpus review`).
 - `just corpus status` says where every case stands, and `just corpus --help` lists the
@@ -294,7 +317,7 @@ The review panel and `just corpus diff CASE` use local movies identified by the 
 | `types` | The type report for every scene |
 | `leaks` | Scenes that render differently after others, in one process |
 
-`render` rewrites a local video only when its pixels change, updating that video's SHA-256 sidecar, and a `case.json` only when its facts do. Rendering Manim's references (the `ce` engine, and both engines when a scene changed) needs Manim Community Edition: `uv sync --group ce` (see [Setup](index.md#manim-community-edition)).
+`render` rewrites Manim's video only when its pixels change, updating its SHA-256 sidecar, ManimGX's reference only when its frames no longer look the same, and a `case.json` only when its facts do. Rendering Manim's references (the `ce` engine, and both engines when a scene changed) needs Manim Community Edition: `uv sync --group ce` (see [Setup](index.md#manim-community-edition)).
 
 ### The review panel
 

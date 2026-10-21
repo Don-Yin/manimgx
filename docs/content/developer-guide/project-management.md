@@ -88,8 +88,8 @@ gets the image. [Releases](#releases) says how a release is made.
 
 Developer A installs the dependencies today and the tests pass. Developer B installs them
 a month later, gets a newer Typst or numpy, and the tests fail. For ManimGX the risk is
-sharper than usual: the integration corpus compares the current and frozen packages' frames
-pixel for pixel, so any change in how a glyph is laid out or a color is rounded shows.
+sharper than usual: the integration corpus holds every frame of its scenes to its reference,
+so a glyph laid out a pixel apart shows.
 
 So everyone needs the same Python, the same version of every package and crate, and the
 same tools with the same settings, in one command:
@@ -331,7 +331,7 @@ the project works. When a command or a rule changes, `AGENTS.md` changes with th
 
 ### [`.gitignore`](https://github.com/academa-labs/manimgx/blob/main/.gitignore)
 
-What is made, not written, stays out of git: the environment, the compiled engine, `rust/target/`, `dist/`, the built site, the docs' rendered films and generated reference, the coverage data and report, and render output (`media/`, `*.mp4`). The corpus's reference videos are `.mkv` files and are ignored by Git; their SHA-256 sidecars are committed.
+What is made, not written, stays out of git: the environment, the compiled engine, `rust/target/`, `dist/`, the built site, the docs' rendered films and generated reference, the coverage data and report, and render output (`media/`, `*.mp4`, `*.mkv`): of the corpus's videos, only ManimGX's references (`manimgx.mkv`) are committed, and Manim's are known by their SHA-256 sidecars.
 
 ## The package
 

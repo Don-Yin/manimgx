@@ -7,7 +7,6 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from fractions import Fraction
 from pathlib import Path
 
 from tests.integration.corpus.case import (
@@ -18,7 +17,7 @@ from tests.integration.corpus.case import (
     Frames,
     frames_from_json,
 )
-from tests.integration.corpus.frozen import Difference
+from tests.integration.corpus.frames import Difference
 
 TIMEOUT: dict[Engine, float] = {"manimgx": 300, "ce": 900}
 
@@ -33,17 +32,14 @@ class Result:
     # ManimGX asked for an MP4: the film's own frame count, and the MP4's
     film_frames: int | None = None
     mp4_frames: int | None = None
+    # compared with its reference: the frames that look different
     differences: tuple[Difference, ...] = ()
-    adapter: dict[str, str] | None = None
-    duration: Fraction | None = None
 
 
-def environment(package: Path | None = None) -> dict[str, str]:
+def environment() -> dict[str, str]:
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
-        p
-        for p in (str(package) if package else "", str(ROOT), env.get("PYTHONPATH", ""))
-        if p
+        p for p in (str(ROOT), env.get("PYTHONPATH", "")) if p
     )
     env["PYTHONHASHSEED"] = "0"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -56,15 +52,13 @@ def run(
     *,
     video: Path | None = None,
     mp4: bool = False,
-    package: Path | None = None,
-    reference: Path | None = None,
-    reference_video: Path | None = None,
-    source: Path | None = None,
+    compare: bool = False,
     differences: Path | None = None,
     log: Path | None = None,
-    compact_video: bool = True,
 ) -> Result:
-    """Render `case` with `engine`; its frames go to `video` too, if given."""
+    """Render `case` with `engine`; its frames go to `video` too, if given. With `compare`,
+    each frame is compared with the case's ManimGX reference as it is drawn, the first few
+    pairs that look different kept as pictures in `differences`."""
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "result.json"
         command = [sys.executable, "-m", f"tests.integration.corpus.run_{engine}"]
@@ -73,23 +67,16 @@ def run(
             command += ["--video", str(video)]
         if mp4:
             command.append("--mp4")
-        if not compact_video:
-            command.append("--fast-video")
-        for flag, path in (
-            ("--reference", reference),
-            ("--reference-video", reference_video),
-            ("--source", source),
-            ("--differences", differences),
-        ):
-            if path is not None:
-                command += [flag, str(path)]
-        if package is not None:
-            command += ["--package", str(package)]
+        if compare:
+            command += ["--reference", str(case.facts_path)]
+            command += ["--reference-video", str(case.video("manimgx"))]
+        if differences is not None:
+            command += ["--differences", str(differences)]
         try:
             proc = subprocess.run(
                 command,
                 cwd=case.dir,
-                env=environment(package),
+                env=environment(),
                 capture_output=True,
                 text=True,
                 timeout=TIMEOUT[engine],
@@ -115,8 +102,6 @@ def run(
         film_frames=data.get("film_frames"),
         mp4_frames=data.get("mp4_frames"),
         differences=tuple(Difference(**item) for item in data.get("differences", [])),
-        adapter=data.get("adapter"),
-        duration=Fraction(data["duration_exact"]) if "duration_exact" in data else None,
     )
 
 

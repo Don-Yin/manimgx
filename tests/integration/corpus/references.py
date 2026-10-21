@@ -1,11 +1,14 @@
 """Making a case's references: render each engine, keep a video only when its pixels change,
-compare the two, and record the facts."""
+compare the two, and record the facts. ManimGX's reference stays while its frames look the
+same (`frames.TOLERANCE`) and keep their times: it changes only when they don't. Nothing in
+a case changes until its new facts are whole."""
 
 import hashlib
 import importlib.metadata
 import importlib.util
 import shutil
 import tempfile
+from contextlib import closing
 from pathlib import Path
 
 from tests.integration.corpus import compare as comparing
@@ -21,6 +24,8 @@ from tests.integration.corpus.case import (
     Failure,
     Frames,
 )
+from tests.integration.corpus.frames import Comparison as FrameComparison
+from tests.integration.corpus.frames import Difference, Movie, decode
 
 
 def render(case: Case, wanted: set[Engine]) -> tuple[Facts, str]:
@@ -28,15 +33,19 @@ def render(case: Case, wanted: set[Engine]) -> tuple[Facts, str]:
     record the facts; them, and what changed."""
     old = case.facts()
     source = case.source_hash()
-    if not case.current(old):
+    current = case.current(old)
+    if not current:
         wanted = set(ENGINES)
     renders_ce = "ce" in wanted or old is None or old.render("ce") is None
     if renders_ce and importlib.util.find_spec("manim") is None:
         msg = f"{case.name}: CE's references need Manim CE (`uv sync --group ce`)"
         raise RuntimeError(msg)
     renders: dict[Engine, Frames | Failure] = {}
+    # each engine's video as the new facts see it, and what a render puts in its place (or
+    # takes out of it) once they are whole
+    videos = {engine: case.video(engine) for engine in ENGINES}
+    placed: dict[Engine, Path | None] = {}
     notes: list[str] = []
-    changed = False
     ce_version = old.ce_version if old is not None else ""
     with tempfile.TemporaryDirectory() as tmp:
         for engine in ENGINES:
@@ -51,34 +60,76 @@ def render(case: Case, wanted: set[Engine]) -> tuple[Facts, str]:
                 raise RuntimeError(msg)
             if engine == "ce":
                 ce_version = result.manim or importlib.metadata.version("manim")
-            renders[engine] = result.frames
-            changed |= previous != result.frames
             video = case.video(engine)
-            if isinstance(result.frames, Failure):
-                video.unlink(missing_ok=True)
-                case.video_hash(engine).unlink(missing_ok=True)
-                notes.append(f"{engine} failed: {result.frames.error}")
+            frames = renders[engine] = result.frames
+            if isinstance(frames, Failure):
+                placed[engine] = None
+                notes.append(f"{engine} failed: {frames.error}")
             elif (
-                isinstance(previous, Frames)
-                and previous.runs == result.frames.runs
+                engine == "manimgx"
+                and current
+                and isinstance(previous, Frames)
                 and video.exists()
-                and case.video_hash(engine).exists()
-                and case.video_hash(engine).read_text(encoding="ascii")
-                == f"{hashlib.sha256(video.read_bytes()).hexdigest()}  {video.name}\n"
+                and _looks_same(video, previous, fresh, frames)
+            ):
+                renders[engine] = previous
+                same = "unchanged" if previous == frames else "looks the same"
+                notes.append(f"{engine} {same}")
+            elif (
+                engine == "ce"
+                and isinstance(previous, Frames)
+                and previous.runs == frames.runs
+                and video.exists()
+                and case.ce_hash.exists()
+                and case.ce_hash.read_text(encoding="ascii") == _identity(video)
             ):
                 notes.append(f"{engine} unchanged")
             else:
-                shutil.move(fresh, video)
-                digest = hashlib.sha256(video.read_bytes()).hexdigest()
-                case.video_hash(engine).write_text(
-                    f"{digest}  {video.name}\n",
-                    encoding="ascii",
-                )
+                placed[engine] = videos[engine] = fresh
                 notes.append(f"{engine} {'new' if previous is None else 'changed'}")
-    kept = None if old is None or changed else old.comparison
-    facts = _facts(case, source, renders["manimgx"], renders["ce"], ce_version, kept)
-    case.write_facts(facts)
+        kept = (
+            old.comparison
+            if old is not None and all(renders[e] == old.render(e) for e in ENGINES)
+            else None
+        )
+        facts = _facts(case, source, renders, videos, ce_version, kept)
+        for engine, made in placed.items():
+            video = case.video(engine)
+            if made is None:
+                video.unlink(missing_ok=True)
+            else:
+                shutil.move(made, video)
+            if engine == "ce":
+                if made is None:
+                    case.ce_hash.unlink(missing_ok=True)
+                else:
+                    case.ce_hash.write_text(_identity(video), encoding="ascii")
+        case.write_facts(facts)
     return facts, "; ".join(notes)
+
+
+def _looks_same(reference: Path, facts: Frames, fresh: Path, frames: Frames) -> bool:
+    """Whether a fresh render keeps the times of ManimGX's reference and looks the same,
+    frame by frame. A reference video that is not the film its facts record looks like
+    nothing."""
+    if not facts.timed_like(frames):
+        return False
+    different: list[Difference] = []
+    try:
+        with closing(Movie(reference, facts)) as movie:
+            comparison = FrameComparison(
+                movie, lambda difference, *_: different.append(difference)
+            )
+            for index, pixels in enumerate(decode(fresh, SIZE)):
+                comparison.add(index, 1, pixels.tobytes())
+    except ValueError:  # (the reference video is not its facts' film)
+        return False
+    return not different
+
+
+def _identity(video: Path) -> str:
+    """A video's identity, as its sidecar records it: the hash of its bytes, and its name."""
+    return f"{hashlib.sha256(video.read_bytes()).hexdigest()}  {video.name}\n"
 
 
 def recompare(case: Case) -> str:
@@ -86,9 +137,9 @@ def recompare(case: Case) -> str:
     facts = case.facts()
     if facts is None:
         return "not rendered"
-    facts = _facts(
-        case, facts.source, facts.manimgx, facts.ce, facts.ce_version, kept=None
-    )
+    renders: dict[Engine, Frames | Failure] = {"manimgx": facts.manimgx, "ce": facts.ce}
+    videos = {engine: case.video(engine) for engine in ENGINES}
+    facts = _facts(case, facts.source, renders, videos, facts.ce_version, kept=None)
     case.write_facts(facts)
     return "compared" if facts.comparison is not None else "nothing to compare"
 
@@ -96,15 +147,17 @@ def recompare(case: Case) -> str:
 def _facts(
     case: Case,
     source: str,
-    manimgx: Frames | Failure,
-    ce: Frames | Failure,
+    renders: dict[Engine, Frames | Failure],
+    videos: dict[Engine, Path],
     ce_version: str,
     kept: Comparison | None,
 ) -> Facts:
+    """The facts of these renders, compared (unless `kept`) through these videos."""
+    manimgx, ce = renders["manimgx"], renders["ce"]
     comparison = None
     if isinstance(manimgx, Frames) and isinstance(ce, Frames):
         if kept is None:
-            missing = [engine for engine in ENGINES if not case.video(engine).exists()]
+            missing = [engine for engine in ENGINES if not videos[engine].exists()]
             if missing:
                 msg = (
                     f"{case.name}: reference video(s) missing ({', '.join(missing)}); "
@@ -112,7 +165,7 @@ def _facts(
                 )
                 raise FileNotFoundError(msg)
         comparison = kept or comparing.compare(
-            ce, manimgx, case.video("ce"), case.video("manimgx"), SIZE, FPS
+            ce, manimgx, videos["ce"], videos["manimgx"], SIZE, FPS
         )
     return Facts(
         source=source,

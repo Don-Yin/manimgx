@@ -57,8 +57,8 @@ The seven regular build, release and collaboration workflows are in
    linked codecs, builds one stable-ABI wheel, and runs `just test-rust`. Linux installs
    lavapipe for the renderer tests. Each successful job keeps its wheel.
 4. **Test**, six times: installs that OS's same wheel on Python 3.13 and 3.14, checks the
-   installed product, acquires the verified frozen corpus packages, then runs
-   `just test-coverage`. These jobs do not rebuild the extension. They keep coverage and
+   installed product, then runs `just test-coverage`; the corpus, whose references are drawn
+   on a Mac, only on macOS with Python 3.14. These jobs do not rebuild the extension. They keep coverage and
    rendering failure evidence even when the suite fails.
 5. **Combine the coverage**, even when a test job failed: `just combine-coverage` makes one
    report of the jobs' data, and its table goes in the run's summary. The report is kept,

@@ -54,7 +54,7 @@ sudo apt-get install libvulkan1 mesa-vulkan-drivers
 
 ### Manim Community Edition
 
-The integration corpus retains reviewed Manim Community Edition renders for comparison. Regular tests compare the latest stable release and current ManimGX on the same host and do not need CE; before the first release, they check rendering and export. Local review movies can be restored from a backup and verified against their committed checksums, or regenerated with `just corpus render`. Changed pixels require a new review. Rendering a new or changed scene with CE needs its dependency group: `uv sync --group ce` (`just sync` leaves it out again). Its bindings to Cairo and Pango build from source where they have no wheels (pycairo on macOS and Linux, ManimPango on Linux), so that needs those libraries: `brew install cairo pkg-config` on macOS, `apt-get install libcairo2-dev libpango1.0-dev pkg-config` on Debian or Ubuntu.
+The integration corpus compares ManimGX with Manim Community Edition for review. Its tests hold ManimGX to its committed references and do not need CE. Manim's movies are rendered locally with `just corpus render`, and identified by their committed checksums. Rendering a new or changed scene with CE needs its dependency group: `uv sync --group ce` (`just sync` leaves it out again). Its bindings to Cairo and Pango build from source where they have no wheels (pycairo on macOS and Linux, ManimPango on Linux), so that needs those libraries: `brew install cairo pkg-config` on macOS, `apt-get install libcairo2-dev libpango1.0-dev pkg-config` on Debian or Ubuntu.
 
 ## Setting up the development environment
 
