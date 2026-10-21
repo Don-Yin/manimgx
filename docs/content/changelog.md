@@ -57,6 +57,7 @@ The notable changes to ManimGX, release by release. The format follows
 - Name a partite layout's vertex that is not in the graph, and a vertex's keywords or an edge's `tip_config` that are not a mapping, in the error raised.
 - Preserve the benchmark comparison images' aspect ratios when PyPI narrows the README table.
 - Credit Filament, whose code the 3D lighting is adapted from, in the README and the wheels' third-party notices.
+- End a `{{…}}` part of a `MathTex` or `Tex` at the `}}` that closes its own braces: `MathTex(r"V={{\tfrac{1}{3}}}B")` split at the fraction's `}}`, so the part was `\tfrac{1}{3` and `get_part_by_tex(r"\tfrac{1}{3}")` found nothing. An escaped brace (`\{` or `\}`) no longer opens or closes a part.
 
 ## 0.1.1
 

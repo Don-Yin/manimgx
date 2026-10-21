@@ -18,6 +18,8 @@ code behaves. This page shows where it is different.
 - You don't install LaTeX. `Tex` and `MathTex` convert their LaTeX to
   [Typst](https://typst.app), which the engine sets. LaTeX packages and `\def` don't
   convert.
+- Double braces make a part wherever they are: `m.MathTex("x={{y}}")` has two parts.
+  Manim CE makes one only at the string's start or after a space.
 
 ## The frame
 

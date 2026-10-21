@@ -37,6 +37,7 @@ from hypothesis import strategies as st
 
 import manimgx as m
 from manimgx.drawing import typesetting as tc
+from manimgx.mobjects.text import _split_braces
 
 
 def _pitch(first: m.Mobject, second: m.Mobject) -> float:
@@ -187,6 +188,37 @@ def test_double_braces_set_a_part_apart() -> None:
         "}",
     ]
     assert [len(part) for part in eq] == [2, 1, 1, 0, 1, 1]
+
+
+def test_double_braces_hold_braces_of_their_own() -> None:
+    """A group ends at the `}}` that closes it, not at the first `}}` within it."""
+    eq = m.MathTex(r"V={{\tfrac{1}{3}}}{{B}}\cdot{{h}}")
+    assert eq.tex_strings == ["V=", r"\tfrac{1}{3}", "B", r"\cdot", "h"]
+    assert eq.get_part_by_tex(r"\tfrac{1}{3}") is not None
+
+
+def test_an_escaped_brace_neither_opens_nor_closes_a_part() -> None:
+    eq = m.MathTex(r"{{\{x\}}}\cup\{{{y}}\}")
+    assert eq.tex_strings == [r"\{x\}", r"\cup\{", "y", r"\}"]
+
+
+@pytest.mark.parametrize("tex", ["a{{b", r"{{\frac{1}{2}}"])
+def test_double_braces_never_closed_are_as_written(tex: str) -> None:
+    assert m.MathTex(tex).tex_strings == [tex]
+
+
+def test_doubled_braces_of_tex_make_parts_too() -> None:
+    """Double braces set a part apart wherever they are, so `x^{{2}}` is "x^" and "2":
+    parts that cannot be told apart."""
+    with pytest.raises(ValueError, match="cannot tell these parts apart"):
+        m.MathTex(r"x^{{2}}")
+
+
+@given(st.text(alphabet="{}\\ab"))
+def test_a_string_split_at_double_braces_joins_back_into_itself(tex: str) -> None:
+    pieces = _split_braces(tex)
+    groups = (p if i % 2 == 0 else "{{" + p + "}}" for i, p in enumerate(pieces))
+    assert "".join(groups) == tex
 
 
 @pytest.mark.parametrize(

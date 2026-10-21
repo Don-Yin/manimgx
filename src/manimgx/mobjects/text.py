@@ -1131,22 +1131,42 @@ def _standalone(tex: str) -> str:
     return "{" * max(0, closes - opens) + tex + "}" * max(0, opens - closes)
 
 
-_BRACES = re.compile("{{(.*?)}}")
 _HOLE = 0xE000  # private-use characters: mitex passes them through as they are
+
+
+_TOKENS = re.compile(r"\\([a-zA-Z]+)|\\.|([{}])")
+_DEPTH = {"{": 1, "}": -1, "begin": 1, "end": -1, "left": 1, "right": -1}
+
+
+def _split_braces(tex: str) -> list[str]:
+    """The string split at its `{{…}}`: what is outside them and what each holds, in turn,
+    starting outside. A group ends at the first `}}` where its own braces are closed, so it
+    may hold braces of its own: `{{\\tfrac{1}{3}}}` holds `\\tfrac{1}{3}`. An escaped brace
+    is no brace, and a `{{` never closed is as written."""
+    pieces: list[str] = []
+    at = depth = 0
+    for token in _TOKENS.finditer(tex):
+        inside = len(pieces) % 2 == 1  # the pieces alternate, starting outside
+        if token.start() < at:
+            continue  # the second brace of a pair
+        if depth == 0 and tex.startswith("}}" if inside else "{{", token.start()):
+            pieces.append(tex[at : token.start()])
+            at = token.start() + 2
+        elif inside:
+            depth += _DEPTH.get(token[2], 0)
+    if len(pieces) % 2:  # a `{{` never closed
+        return [*pieces[:-1], pieces[-1] + tex[at - 2 :]]
+    return [*pieces, tex[at:]]
 
 
 def _isolate_braces(strings: list[str], math: bool) -> list[str]:
     """CE's double braces: `{{…}}` sets what it holds apart as a part of its own. In math,
     where spaces mean nothing, once they split anything every part is stripped; text keeps
     its spaces, so its strings still join into the text as written."""
-    pieces = [p for s in strings for p in _BRACES.split(s)]
+    pieces = [p for s in strings for p in _split_braces(s)]
     if math and len(pieces) > len(strings):
         pieces = [p.strip() for p in pieces]
     return [p for p in pieces if p]
-
-
-_TOKENS = re.compile(r"\\([a-zA-Z]+)|\\.|([{}])")
-_DEPTH = {"{": 1, "}": -1, "begin": 1, "end": -1, "left": 1, "right": -1}
 
 
 def _balanced(tex: str) -> bool:
@@ -1362,11 +1382,14 @@ class MathTex(Typst):
     The strings are one formula, joined by `arg_separator` and typeset whole, so parting
     a formula moves none of its glyphs. Each string is a part, a
     [MathTexPart][manimgx.MathTexPart] of the glyphs it adds, and double braces set a
-    part apart within a string: `MathTex("{{a^2}} + {{b^2}} = {{c^2}}")` has the five
-    parts of the first example below. A string that stands on its own (its braces,
-    environments and `\left`…`\right` closed within it) holds exactly its glyphs. The
-    rest, such as a fraction's bar or the glyphs of a fragment like `"^2"`, go to the
-    first fragment between the standing strings around them: in
+    part apart within a string, wherever they are:
+    `MathTex("{{a^2}} + {{b^2}} = {{c^2}}")` has the five parts of the first example
+    below. A part ends at the `}}` that closes its own braces, so it may hold braces of
+    its own (`{{\tfrac{1}{3}}}`); an escaped brace (`\{`) is no brace, and a `{{` never
+    closed is as written. A string that stands on its own (its braces, environments and
+    `\left`…`\right` closed within it) holds exactly its glyphs. The rest, such as a
+    fraction's bar or the glyphs of a fragment like `"^2"`, go to the first fragment
+    between the standing strings around them: in
     `MathTex(r"\frac{", "a", "}{", "b", "}")` the bar is the closing `"}"`'s, where TeX
     draws it, and in `MathTex(r"e^{i", r"\pi}")`, split inside a term, every glyph is
     the first part's. A formula whose parts can't be told apart raises ValueError.
