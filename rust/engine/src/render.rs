@@ -1091,12 +1091,17 @@ async fn adapter(instance: &wgpu::Instance) -> Result<wgpu::Adapter, String> {
 }
 
 impl Gpu {
-    /// The system's GPU, WebGPU's (Metal, Vulkan, DX12, the browser's): its device, and what draws on it.
+    /// The system's GPU, through the system's own API (Metal on macOS, Direct3D 12 on Windows, Vulkan on Linux, the
+    /// browser's WebGPU): its device, and what draws on it.
     pub(crate) async fn new() -> Result<Self, String> {
         // the system's adapter; where none will do, the lavapipe a Linux wheel bundles
         let descriptor = wgpu::InstanceDescriptor { backends: wgpu::Backends::PRIMARY, ..wgpu::InstanceDescriptor::new_without_display_handle() };
+        // On Windows, Direct3D 12 alone, as browsers draw WebGPU there: offered Vulkan too, wgpu
+        // takes a GPU's Vulkan driver first, which is not the one Windows and its apps are tested
+        // with (an Intel GPU's crashed), nor the one CI draws with: WARP is Direct3D 12's.
         #[cfg(windows)]
         let descriptor = wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::DX12,
             backend_options: wgpu::BackendOptions { dx12: wgpu::Dx12BackendOptions { shader_compiler: dxc::compiler()?, ..Default::default() }, ..descriptor.backend_options },
             ..descriptor
         };
