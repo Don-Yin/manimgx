@@ -16,15 +16,13 @@ const SUBMODULES: &[(&str, &str)] = &[
     ("https://github.com/KhronosGroup/SPIRV-Tools/archive/ef96ed763b43b59b33b31b362f09a02b729fa1c9.tar.gz", "a2e2378712cd1a21fdbfc24c7fc8533df44b33ca0a051e258e2f3ddf3a7b2ee5"),
 ];
 
-/// Stage DXC in the engine's OUT_DIR for maturin. A build of the complete source on any
-/// platform (MANIMGX_COMPLETE_SOURCE, set beside its source store) collects both the
-/// distributable and its matching source; other non-Windows builds do no DXC work, with a
-/// source store or without. Only dxcompiler.dll is needed: since DXC 1.8.2502, dxil.dll is
-/// optional.
+/// Stage DXC in the engine's OUT_DIR for maturin. A complete-source build on any platform
+/// collects both the distributable and its matching source; ordinary non-Windows builds do no
+/// DXC work. Only dxcompiler.dll is needed: since DXC 1.8.2502, dxil.dll is optional.
 pub fn prepare() {
-    println!("cargo:rerun-if-env-changed=MANIMGX_COMPLETE_SOURCE");
+    println!("cargo:rerun-if-env-changed=MANIMGX_SOURCES");
     let windows = std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows");
-    let collecting = std::env::var_os("MANIMGX_COMPLETE_SOURCE").is_some();
+    let collecting = std::env::var_os("MANIMGX_SOURCES").is_some();
     if !windows && !collecting { return; }
     let archive = fetch::file(BINARY_URL, BINARY_HASH);
     if collecting {
