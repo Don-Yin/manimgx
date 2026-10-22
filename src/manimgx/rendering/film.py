@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
     from manimgx.animation.timeline import Animation
     from manimgx.audio.sound import Clip
-    from manimgx.drawing.geometry import Path
+    from manimgx.drawing.geometry import Trajectory
     from manimgx.mobject import Mobject
     from manimgx.scene import Camera
 
@@ -450,7 +450,7 @@ class Film:
         self,
         camera: "Camera",
         mobjects: "list[Mobject]",
-        leaves: "list[tuple[Mobject, list[Mobject], Path, np.ndarray, np.ndarray]]",
+        leaves: "list[tuple[Mobject, list[Mobject], Trajectory, np.ndarray, np.ndarray]]",
     ) -> None:
         """Record, at once, the frames of a play that only carries its leaves between
         keyframes: the scene calls it for such a play.

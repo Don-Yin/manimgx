@@ -63,7 +63,7 @@ from manimgx.drawing.geometry import (
     EMPTY,
     Blend,
     Lattice,
-    Path,
+    Trajectory,
     _pathops,
     bezier,
     bezier_remap,
@@ -2485,6 +2485,28 @@ class Mobject:
         """
         return self.height
 
+    @deprecated("set_width(w) is width = w: use it", category=None)
+    def set_width(self, width: float) -> Self:
+        """Scale the mobject to a [width][manimgx.Mobject.width], in proportion, about its
+        center.
+
+        Args:
+            width: The width, in scene units.
+        """
+        self.width = width
+        return self
+
+    @deprecated("set_height(h) is height = h: use it", category=None)
+    def set_height(self, height: float) -> Self:
+        """Scale the mobject to a [height][manimgx.Mobject.height], in proportion, about its
+        center.
+
+        Args:
+            height: The height, in scene units.
+        """
+        self.height = height
+        return self
+
     # ── layout ────────────────────────────────────────────────────────────
     def center(self) -> Self:
         """Move the mobject so the center of its bounding box is at the origin."""
@@ -4076,7 +4098,7 @@ class Mobject:
         """
         g1, g2 = mobject1._geometry, mobject2._geometry
         if (
-            isinstance(path_func, Path) and g1.n == g2.n
+            isinstance(path_func, Trajectory) and g1.n == g2.n
         ):  # a linear path moves shapes, not points
             self._geometry = Blend.mix(g1, g2, path_func.coefficients(alpha))
         else:

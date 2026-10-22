@@ -51,7 +51,7 @@ from manimgx.constants import (
     UP,
 )
 from manimgx.drawing.geometry import (
-    Path,
+    Trajectory,
     interpolate,
     inverse_interpolate,
     normalize,
@@ -1867,7 +1867,7 @@ class MoveAlongPath(Transform):
         self, mobject: Mobject, path: VMobject, **kwargs: Unpack[TransformOptions]
     ) -> None:
         self.path = path
-        kwargs["path_func"] = Path(steps=(path.point_from_proportion,))
+        kwargs["path_func"] = Trajectory(steps=(path.point_from_proportion,))
         super().__init__(
             mobject,
             keys=tuple(

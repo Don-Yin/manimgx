@@ -114,7 +114,7 @@ as `path_func`.
     options:
       heading_level: 3
 
-::: manimgx.Path
+::: manimgx.Trajectory
     options:
       heading_level: 3
 

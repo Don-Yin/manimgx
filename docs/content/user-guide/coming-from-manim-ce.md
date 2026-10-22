@@ -9,17 +9,31 @@ code behaves. This page shows where it is different.
 
 - Every name is in the package: `import manimgx as m`, then `m.Circle`, or
   `from manimgx import *`. Manim CE's modules are not there: write
-  `from manimgx import polylabel`, not `from manimgx.utils.polylabel import polylabel`.
+  `from manimgx import polylabel`, not `from manimgx.utils.polylabel import polylabel`,
+  and `rate_func=m.smooth`, not `rate_functions.smooth`.
 - NumPy is not in the package: import it yourself (`import numpy as np`). Manim CE's
   `from manim import *` brings `np` with it; ManimGX's brings only ManimGX's names.
 - Render with `manimgx render scene.py MyScene`. Manim CE's quality flags (`-ql`, `-qh`,
   …) become `-r` (`--resolution`) and `--fps`. `manimgx inspect` writes a storyboard and checks 2D layouts without a video. See
   [Rendering and sharing](rendering.md).
+- A still part of a video is one frame, shown for as long as the part lasts, so
+  `ffmpeg -ss` can land on the frame after it. To cut or join videos with ffmpeg, make
+  their frame rate constant first: `ffmpeg -i in.mp4 -fps_mode cfr -r 60 out.mp4`.
+
+## Text, formulas and images
+
 - You don't install LaTeX. `Tex` and `MathTex` convert their LaTeX to
   [Typst](https://typst.app), which the engine sets. LaTeX packages and `\def` don't
   convert.
 - Double braces make a part wherever they are: `m.MathTex("x={{y}}")` has two parts.
   Manim CE makes one only at the string's start or after a space.
+- A fraction's glyphs come in the order numerator, denominator, bar; Manim CE's come
+  numerator, bar, denominator. An overline comes after what it covers. Code that picks a
+  glyph by its place, such as `frac[0][1]` for the bar, picks another one.
+- `Text(line_spacing=x)` puts lines `1 + x` font sizes apart; Manim CE puts them
+  `0.75 × (1 + x)` apart. So Manim CE's 0.8 is ManimGX's 0.35.
+- An `ImageMobject`'s `pixel_array` can't be assigned: make a new image to show other
+  pixels.
 
 ## The frame
 
@@ -54,7 +68,7 @@ works, but your editor marks it deprecated and names the one to use:
 - `arrange_submobjects` is `arrange`, `rotate_about_origin(angle)` is
   `rotate(angle, about_point=m.ORIGIN)`, and `get_edge_center(m.UP)` is `get_top()`.
 - A getter such as `get_width()`, `get_height()` or `get_color()` is its property:
-  `width`, `height`, `color`.
+  `width`, `height`, `color`. So are the setters: `set_width(3)` is `width = 3`.
 - `PGroup` is `Group`, and the singular `add_foreground_mobject` is
   `add_foreground_mobjects`.
 
@@ -80,6 +94,8 @@ ManimGX does the work of manim-voiceover and manim-slides, without plugins:
 - [`add_sound`][manimgx.Scene.add_sound] puts a sound in the video. A
   [`Sound`][manimgx.Sound] can also be a part of a play.
 - A voiceover is `self.say("The derivative of [x squared] is [two x].", anim1, anim2)`.
+  If your scene has a `say` method of its own, as many Manim CE projects do for their
+  voiceover, it replaces ManimGX's: rename yours.
   Each animation plays during its words in brackets, and the scene waits until the line
   ends. This replaces `with self.voiceover(...) as tracker:`, bookmarks and
   `run_time=tracker.duration`. Any text-to-speech service can be a voice.

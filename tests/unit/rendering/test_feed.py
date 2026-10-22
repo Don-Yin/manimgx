@@ -46,7 +46,7 @@ from tests.scenes import frames, scene_3d
 
 import manimgx as m
 from manimgx._engine import Player, Recorder, digest
-from manimgx.drawing.geometry import Path
+from manimgx.drawing.geometry import Trajectory
 from manimgx.rendering import feed
 
 
@@ -601,7 +601,7 @@ def test_streaming_still_mixes_whole_keyframe_intervals(
     def measured(
         a: m.Mobject,
         b: m.Mobject,
-        path: Path,
+        path: Trajectory,
         t: np.ndarray,
         args: tuple,
         live: np.void | None,

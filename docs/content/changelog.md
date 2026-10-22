@@ -22,6 +22,7 @@ The notable changes to ManimGX, release by release. The format follows
 
 - Add a preview image and social metadata when sharing website and documentation links.
 - Credit Academa and the creators in the README.
+- Add `set_width()` and `set_height()`, deprecated in favor of setting `width` and `height`, as `get_width()` and `get_height()` are: Manim CE scenes size mobjects with them ([#35](https://github.com/academa-labs/manimgx/issues/35)).
 - Add Manim CE's `partial_bezier_points`, `subdivide_bezier`, `bezier_remap`, `integer_interpolate`, `is_closed` and `get_smooth_cubic_bezier_handle_points` to the package.
 - Add `remove_fixed_in_frame_mobjects` to `ThreeDScene` and `Camera`, Manim CE's undo of `add_fixed_in_frame_mobjects`: the camera moves the mobjects again.
 - Add `get_height()`, deprecated in favor of `height`, as `get_width()` is in favor of `width`: Manim CE scenes call both.
@@ -42,6 +43,8 @@ The notable changes to ManimGX, release by release. The format follows
 - Take NumPy out of the package: a scene imports it itself (`import numpy as np`), and `from manimgx import *` no longer brings `np`.
 - Make the voices' names the package's, as every other name is: `m.Fal`, `m.Voice`, `m.Word`, `m.timed`, `m.estimate` and `m.cached`, where they were `m.voices.Fal` and `manimgx.audio.Voice`. `m.voices` is gone.
 - Name the settings' module `manimgx.settings`. `manimgx.config` is the settings themselves, as `m.config` is: after `import manimgx.config`, `manimgx.config.Config` failed.
+- Name the value that says how a transform's points travel `Trajectory`, where it was `Path`, which `from manimgx import *` put in place of `pathlib.Path` ([#35](https://github.com/academa-labs/manimgx/issues/35)).
+- Name more of Manim CE's differences on the migration page: a fraction's glyph order, `line_spacing`, `rate_functions`, `pixel_array`, held frames and `ffmpeg -ss`, and a scene's own `say` ([#35](https://github.com/academa-labs/manimgx/issues/35)).
 
 ### Fixed
 

@@ -56,10 +56,10 @@ __all__ = [
     "STRAIGHT_PATH_THRESHOLD",
     "Coefficients",
     "Floats",
-    "Path",
     "QuickHull",
     "R3_to_complex",
     "Step",
+    "Trajectory",
     "angle_axis_from_quaternion",
     "angle_between_vectors",
     "angle_of_vector",
@@ -1633,7 +1633,7 @@ def _cross(axis: Floats) -> Floats:
 
 
 @dataclass(frozen=True, slots=True, eq=False)
-class Path:
+class Trajectory:
     """How the points of a shape travel in a transform, from where they start to where
     they end, as a value.
 
@@ -1755,14 +1755,14 @@ def _unit(axis: Vector3DLike) -> Floats:
     return unit
 
 
-def straight_path() -> Path:
+def straight_path() -> Trajectory:
     """The straight path: each point goes along the line from its start to its end, as
     a transform moves points by default.
     """
-    return Path()
+    return Trajectory()
 
 
-def path_along_arc(arc_angle: float, axis: Vector3DLike = _PATH_AXIS) -> Path:
+def path_along_arc(arc_angle: float, axis: Vector3DLike = _PATH_AXIS) -> Trajectory:
     """A path along arcs: each point travels along a circular arc from its start to its
     end, turning through an angle, as a transform's `path_arc` makes it move.
 
@@ -1775,7 +1775,7 @@ def path_along_arc(arc_angle: float, axis: Vector3DLike = _PATH_AXIS) -> Path:
     """
     if abs(arc_angle) < STRAIGHT_PATH_THRESHOLD:
         return straight_path()
-    return Path("arc", arc_angle, _unit(axis))
+    return Trajectory("arc", arc_angle, _unit(axis))
 
 
 def path_along_circles(
@@ -1787,9 +1787,9 @@ def path_along_circles(
     it moves from its start to its end, as a transform's `path_arc_centers` makes it
     move.
 
-    With one center, the shape turns about it as a whole, as a [Path][manimgx.Path];
-    with a center per point, each point turns about its own, as a plain function of
-    `(start, end, alpha)`.
+    With one center, the shape turns about it as a whole, as a
+    [Trajectory][manimgx.Trajectory]; with a center per point, each point turns about its
+    own, as a plain function of `(start, end, alpha)`.
 
     Args:
         arc_angle: The angle, in radians, counterclockwise about `axis`.
@@ -1799,7 +1799,7 @@ def path_along_circles(
     unit_axis = _unit(axis)
     points: Floats = np.asarray(centers, dtype=np.float64)
     if points.ndim == 1:
-        return Path(steps=((arc_angle, unit_axis, points),))
+        return Trajectory(steps=((arc_angle, unit_axis, points),))
 
     def path(start: Point3D_Array, end: Point3D_Array, alpha: float) -> Point3D_Array:
         detransformed = (
@@ -1811,21 +1811,21 @@ def path_along_circles(
     return path
 
 
-def clockwise_path() -> Path:
+def clockwise_path() -> Trajectory:
     """A path along half circles, clockwise: each point turns through π on its way from
     its start to its end.
     """
     return path_along_arc(-np.pi)
 
 
-def counterclockwise_path() -> Path:
+def counterclockwise_path() -> Trajectory:
     """A path along half circles, counterclockwise: each point turns through π on its
     way from its start to its end.
     """
     return path_along_arc(np.pi)
 
 
-def spiral_path(angle: float, axis: Vector3DLike = _PATH_AXIS) -> Path:
+def spiral_path(angle: float, axis: Vector3DLike = _PATH_AXIS) -> Trajectory:
     """A spiral path: each point spirals out from its start to its end, its offset from
     its start growing as it turns counterclockwise through `angle` (for a positive
     angle) into line with its end.
@@ -1838,7 +1838,7 @@ def spiral_path(angle: float, axis: Vector3DLike = _PATH_AXIS) -> Path:
     """
     if abs(angle) < STRAIGHT_PATH_THRESHOLD:
         return straight_path()
-    return Path("spiral", angle, _unit(axis))
+    return Trajectory("spiral", angle, _unit(axis))
 
 
 type Matrix = Floats  # 3×4: [linear 3×3 | translation]

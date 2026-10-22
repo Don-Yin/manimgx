@@ -42,7 +42,7 @@ from manimgx.mobjects.lights import (
 )
 
 if TYPE_CHECKING:
-    from manimgx.drawing.geometry import Path
+    from manimgx.drawing.geometry import Trajectory
     from manimgx.mobject import Mobject
     from manimgx.scene import Camera
 
@@ -1161,7 +1161,7 @@ class Feeder:
         self,
         camera: "Camera",
         mobjects: "list[Mobject]",
-        leaves: "list[tuple[Mobject, list[Mobject], Path, np.ndarray, np.ndarray]]",
+        leaves: "list[tuple[Mobject, list[Mobject], Trajectory, np.ndarray, np.ndarray]]",
     ) -> Iterator[tuple[bytes, bytes]]:
         """Mix whole keyframe intervals on the CPU; upload an interval when it first appears.
 
@@ -1184,11 +1184,11 @@ class Feeder:
                 rows[:, k], present[:, k] = r, True
         position = {id(mob): k for k, mob in enumerate(mobjects)}
         type Interval = tuple[
-            Mobject, Mobject, Mobject, Path, np.ndarray, np.ndarray, int
+            Mobject, Mobject, Mobject, Trajectory, np.ndarray, np.ndarray, int
         ]
         type Cached = dict[float, tuple[np.void | None, tuple[int, ...]]]
         type Materialize = tuple[
-            Mobject, Mobject, Mobject, Path, np.ndarray, float, int, Cached
+            Mobject, Mobject, Mobject, Trajectory, np.ndarray, float, int, Cached
         ]
         starts: dict[int, list[Interval]] = {}
         moving: dict[int, list[Materialize]] = {}
@@ -1270,7 +1270,7 @@ class Feeder:
         self,
         camera: "Camera",
         mobjects: "list[Mobject]",
-        leaves: "list[tuple[Mobject, list[Mobject], Path, np.ndarray, np.ndarray]]",
+        leaves: "list[tuple[Mobject, list[Mobject], Trajectory, np.ndarray, np.ndarray]]",
         frames: int,
     ) -> list[bytes] | None:
         """Each frame's view of a pure play that moves the camera or a light (None if it moves
@@ -1298,7 +1298,7 @@ class Feeder:
         self,
         a: "Mobject",
         b: "Mobject",
-        path: "Path",
+        path: "Trajectory",
         t: np.ndarray,
         args: tuple,
         live: np.void | None,

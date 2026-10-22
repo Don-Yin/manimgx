@@ -836,7 +836,7 @@ def test_a_mix_of_independent_placements_of_one_shape_stays_one_shape(
         if path_kind == "straight"
         else g.path_along_circles(np.pi / 3, np.array([1.0, 2.0, 3.0]))
     )
-    assert isinstance(path, g.Path)
+    assert isinstance(path, g.Trajectory)
     coefficients = path.coefficients(alpha)
     if path_kind == "circle":
         assert coefficients[2].any()
@@ -929,7 +929,7 @@ def every_path(draw: st.DrawFn) -> g.PathFunc:
             max_size=4,
         )
     )
-    return g.Path(steps=tuple(steps))
+    return g.Trajectory(steps=tuple(steps))
 
 
 @given(path=every_path(), ends=clouds)
@@ -1052,7 +1052,7 @@ class TestCarried:
         np.testing.assert_allclose(
             shape @ motion[:3, :3].T + motion[:3, 3], expected, atol=1e-9
         )
-        path = g.Path(steps=tuple(steps))
+        path = g.Trajectory(steps=tuple(steps))
         actual = path(shape, at(1), alpha)
         np.testing.assert_allclose(actual, expected, atol=1e-9)
         np.testing.assert_allclose(

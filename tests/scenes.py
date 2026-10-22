@@ -30,7 +30,7 @@ from manimgx.settings import config
 
 if TYPE_CHECKING:
     from manimgx.animation.transform import Transform
-    from manimgx.drawing.geometry import Path
+    from manimgx.drawing.geometry import Trajectory
     from manimgx.scene import Act
 
 
@@ -234,13 +234,13 @@ class Recorder(m.Scene):
 
     def _pure_tweens(
         self, anim: m.Animation, alpha: list[float]
-    ) -> "tuple[list[tuple[Transform, Path]], set[int]] | None":
+    ) -> "tuple[list[tuple[Transform, Trajectory]], set[int]] | None":
         return super()._pure_tweens(anim, alpha) if self.fast else None
 
     def _advance_tweens(
         self,
         anim: m.Animation,
-        tweens: "list[tuple[Transform, Path]]",
+        tweens: "list[tuple[Transform, Trajectory]]",
         alpha: list[float],
         introduced: set[int],
     ) -> None:

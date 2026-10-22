@@ -26,8 +26,8 @@ from manimgx.constants import ORIGIN, OUT, PI
 from manimgx.drawing.geometry import (
     Blend,
     Floats,
-    Path,
     Step,
+    Trajectory,
     carried,
     path_along_arc,
     path_along_circles,
@@ -170,7 +170,7 @@ class TransformOptions(_AnimationOptions, total=False, closed=True):
 
     path_func: PathFunc | None
     """How each point travels from its start to its end: a function of the start points,
-    the end points and the progress (see [paths][manimgx.Path]); it replaces
+    the end points and the progress (see [paths][manimgx.Trajectory]); it replaces
     `path_arc` and `path_arc_centers` (default None: a straight path)."""
     path_arc: float
     """The angle each point turns through on its way, in radians: 0 is a straight path,
@@ -210,7 +210,7 @@ class Transform[M: Mobject = Mobject](Animation[M]):
             `keys` is omitted. Passing only `keys` leaves `target_mobject` as None.
         path_func: How each point travels from its start to its end: a function of the
             start points, the end points and the progress (see
-            [paths][manimgx.Path]); it replaces `path_arc` and `path_arc_centers`.
+            [paths][manimgx.Trajectory]); it replaces `path_arc` and `path_arc_centers`.
             None: a straight path.
         path_arc: The angle each point turns through on its way, in radians: 0 is a
             straight path, and a positive angle turns counterclockwise.
@@ -347,7 +347,9 @@ class Transform[M: Mobject = Mobject](Animation[M]):
         motion undone. None when the path is not a motion.
         """
         path, frames = self.path_func, self.frames
-        if not (isinstance(path, Path) and path.kind == "motion" and len(frames) == 2):
+        if not (
+            isinstance(path, Trajectory) and path.kind == "motion" and len(frames) == 2
+        ):
             return None
         moved = frames[1].get_center() - frames[0].get_center()
         steps = path.steps or ((moved,) if np.any(moved) else ())
@@ -599,7 +601,7 @@ class _Leaf:
                 path = tween.path_func
                 rest = (
                     Blend.mix(a._geometry, b._geometry, path.coefficients(t))
-                    if isinstance(path, Path)
+                    if isinstance(path, Trajectory)
                     else Blend.of(path(a.points, b.points, t))
                 )
             else:  # its chord in the frame its motion carries
@@ -1052,7 +1054,7 @@ class Animate[M: Mobject](Transform[M], _Methods):
             moved = target.get_center() - before
             if np.any(moved):
                 steps.append(moved)
-        self._path_func = self._chosen = Path(steps=tuple(steps))
+        self._path_func = self._chosen = Trajectory(steps=tuple(steps))
         return target
 
     def finish(self) -> None:

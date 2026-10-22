@@ -68,7 +68,7 @@ if TYPE_CHECKING:
     from manimgx.animation.transform import Compositor, Transform, TransformOptions
     from manimgx.audio import Speech, Voice
     from manimgx.audio.sound import Clip, Sound
-    from manimgx.drawing.geometry import Path
+    from manimgx.drawing.geometry import Trajectory
     from manimgx.mobject import ValueTracker
     from manimgx.mobjects.images import ImageCameraOptions
 from dataclasses import dataclass
@@ -892,8 +892,8 @@ class Scene:
 
     def _pure_tweens(
         self, anim: Animation, alpha: list[float]
-    ) -> tuple[list[tuple[Transform, Path]], set[int]] | None:
-        """A play that is a pure function of time — its tweens (Transforms along a `Path` between
+    ) -> tuple[list[tuple[Transform, Trajectory]], set[int]] | None:
+        """A play that is a pure function of time — its tweens (Transforms along a `Trajectory` between
         fixed keyframes, one per leaf, under compositions that only time them, going forward) and the
         objects it introduces; None if anything else acts (updaters, procedures, a camera's picture),
         and then every frame is computed. Its groups begin every part now (`begin_all`): nothing a
@@ -908,14 +908,14 @@ class Scene:
         )
         from manimgx.animation.transform import Transform
         from manimgx.audio.sound import Sound
-        from manimgx.drawing.geometry import Path
+        from manimgx.drawing.geometry import Trajectory
 
         members = self.get_mobject_family_members()
         if self.updaters or any(
             m.updaters or isinstance(m.paint.texture, Camera) for m in members
         ):
             return None
-        tweens: list[tuple[Transform, Path]] = []
+        tweens: list[tuple[Transform, Trajectory]] = []
         begins: list[int] = []  # the frame each tween begins at
         for node, progress, closes in walk(anim, np.array(alpha)):
             if not _forward(progress):
@@ -934,7 +934,7 @@ class Scene:
                 return None
             kind, path = type(node), node.path_func
             if not (
-                isinstance(path, Path)
+                isinstance(path, Trajectory)
                 and kind.interpolate is Animation.interpolate
                 and kind.interpolate_mobject is Animation.interpolate_mobject
                 and kind.interpolate_keyframes is Transform.interpolate_keyframes
@@ -990,15 +990,15 @@ class Scene:
         self.mobjects = [r for r in self.mobjects if id(r) in present] + new
         introduced = {id(x) for root in new for x in root.get_family()}
         # each tween's path as its beginning decided it (`.animate` makes its turns a motion
-        # when it begins): read now, not before its part began (a Path stays a Path)
+        # when it begins): read now, not before its part began (a Trajectory stays a Trajectory)
         return [
-            (tween, cast("Path", tween.path_func)) for tween, _ in tweens
+            (tween, cast("Trajectory", tween.path_func)) for tween, _ in tweens
         ], introduced
 
     def _advance_tweens(
         self,
         anim: Animation,
-        tweens: list[tuple[Transform, Path]],
+        tweens: list[tuple[Transform, Trajectory]],
         alpha: list[float],
         introduced: set[int],
     ) -> None:
@@ -2201,10 +2201,10 @@ class ThreeDScene(Scene):
 
 def _tracks(
     anim: Animation,
-    tweens: list[tuple[Transform, Path]],
+    tweens: list[tuple[Transform, Trajectory]],
     alpha: np.ndarray,
     introduced: set[int],
-) -> list[tuple[Mobject, list[Mobject], Path, np.ndarray, np.ndarray]]:
+) -> list[tuple[Mobject, list[Mobject], Trajectory, np.ndarray, np.ndarray]]:
     """A pure play at these alphas: per leaf, its keyframes, path, and per instant its interval
     and t (-1: not begun, as the play found it; -2: absent, before the part that brings it
     begins or after a remover's window closes)."""

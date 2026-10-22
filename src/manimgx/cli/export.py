@@ -43,7 +43,7 @@ from manimgx.settings import config
 
 if TYPE_CHECKING:
     from manimgx.animation.transform import Transform
-    from manimgx.drawing.geometry import Path as MotionPath
+    from manimgx.drawing.geometry import Trajectory
 
 
 def render(
@@ -192,7 +192,7 @@ def inspect(
 
         def _pure_tweens(
             self, anim: Animation, alpha: list[float]
-        ) -> "tuple[list[tuple[Transform, MotionPath]], set[int]] | None":
+        ) -> "tuple[list[tuple[Transform, Trajectory]], set[int]] | None":
             if pending and pending[-1][0] < self.frame + len(alpha):
                 return None  # this play needs its mutable world at the selected frames
             return super()._pure_tweens(anim, alpha)

@@ -2848,3 +2848,12 @@ def test_get_height_is_height_as_get_width_is_width() -> None:
     rectangle = m.Rectangle(width=3.0, height=1.25)
     assert rectangle.get_width() == rectangle.width == pytest.approx(3.0)
     assert rectangle.get_height() == rectangle.height == pytest.approx(1.25)
+
+
+def test_set_width_and_set_height_scale_in_proportion_as_the_properties_do() -> None:
+    """Manim CE code sizes a mobject with both setters: they set `width` and `height`."""
+    rectangle = m.Rectangle(width=3.0, height=1.5)
+    assert rectangle.set_width(6.0) is rectangle
+    assert (rectangle.width, rectangle.height) == pytest.approx((6.0, 3.0))
+    rectangle.set_height(1.0)
+    assert (rectangle.width, rectangle.height) == pytest.approx((2.0, 1.0))
