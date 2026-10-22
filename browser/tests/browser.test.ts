@@ -41,6 +41,7 @@ async function page(
     cursor = "default";
     feeds: number[][] = [];
     fullscreenChanges = 0;
+    switches = { controls: true, looping: false, mute: false };
     wakeAfter = -1;
     frees = 0;
     constructor(_canvas: unknown, time: number, playing: boolean) {
@@ -68,6 +69,15 @@ async function page(
     fullscreen() {
       this.fullscreenChanges++;
     }
+    controls(on: boolean) {
+      this.switches.controls = on;
+    }
+    looping(on: boolean) {
+      this.switches.looping = on;
+    }
+    mute(on: boolean) {
+      this.switches.mute = on;
+    }
   }
   const waiting = { textContent: "", remove() {} };
   const canvas = Object.assign(new EventTarget(), {
@@ -79,7 +89,6 @@ async function page(
 
   class Element extends EventTarget {
     isConnected = true;
-    tabIndex = -1;
     style = { setProperty() {} };
     attributes = new Map<string, string>();
     shadowRoot = {
@@ -101,13 +110,23 @@ async function page(
     }
     setAttribute(name: string, value: string) {
       this.attributes.set(name, value);
-      this.attributeChangedCallback();
+      this.#changed(name);
     }
     removeAttribute(name: string) {
       this.attributes.delete(name);
-      this.attributeChangedCallback();
+      this.#changed(name);
     }
-    attributeChangedCallback() {}
+    get tabIndex() {
+      return Number(this.getAttribute("tabindex") ?? -1);
+    }
+    set tabIndex(value: number) {
+      this.setAttribute("tabindex", String(value));
+    }
+    #changed(name: string) {
+      const { observedAttributes } = this.constructor as { observedAttributes?: string[] };
+      if (observedAttributes?.includes(name)) this.attributeChangedCallback(name);
+    }
+    attributeChangedCallback(_name: string) {}
   }
 
   class Director {
@@ -272,7 +291,6 @@ describe("published browser module", () => {
       { film: 1, run: { source: "class Demo(Scene):\n    pass\n", scene: null } },
     ]);
     expect(state.canvas).toMatchObject({ width: 640, height: 360 });
-    expect(player.tabIndex).toBe(0);
     await director.onmessage!({ data: { status: "Installing ManimGX…" } });
     expect(state.waiting.textContent).toBe("Installing ManimGX…");
     player.source = "class Changed(Scene): pass";
@@ -352,6 +370,34 @@ describe("published browser module", () => {
     expect(state.natives[1]!.frees).toBe(1);
     expect(state.observers.every((observer) => observer.targets.size === 0)).toBe(true);
     expect(state.waiting.textContent).toBe("decode failed");
+  });
+
+  test("takes a video's controls, loop and muted, and is a tab stop only with its controls", async () => {
+    const state = await page();
+    const player = new state.api.ManimgxPlayer();
+    player.setAttribute("loop", "");
+    player.connectedCallback();
+    state.flush();
+    expect(player.hasAttribute("tabindex")).toBe(false);
+    await state.workers[0]!.onmessage!({
+      data: { engine: { js: "", wasm: new Uint8Array(), fonts: [] } },
+    });
+    await settle();
+    const native = state.natives[0]!;
+    expect(native.switches).toEqual({ controls: false, looping: true, mute: false });
+    player.setAttribute("controls", "");
+    player.setAttribute("muted", "");
+    player.removeAttribute("loop");
+    expect(native.switches).toEqual({ controls: true, looping: false, mute: true });
+    expect(player.tabIndex).toBe(0);
+    player.removeAttribute("controls");
+    expect(native.switches.controls).toBe(false);
+    expect(player.hasAttribute("tabindex")).toBe(false);
+    // the page's own tabindex stays the page's
+    player.tabIndex = -1;
+    player.setAttribute("controls", "");
+    player.removeAttribute("controls");
+    expect(player.tabIndex).toBe(-1);
   });
 
   test("disconnecting during boot does not create an orphan native player", async () => {

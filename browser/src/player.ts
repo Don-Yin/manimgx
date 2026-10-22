@@ -3,9 +3,11 @@
 // time, the plays, captions, the scene's error, the keys) onto a canvas with WebGPU, and keeps the
 // clock and the sound. The element only hands it what its viewer does, in the web's own words,
 // draws it when it is due, and does what it asks (another scene, full screen). Its scene is
-// Python, run in the browser by Pyodide (see director.ts).
+// Python, run in the browser by Pyodide (see director.ts). It takes a <video>'s `controls`
+// (without them, it is a picture that plays, the page handling every event), `autoplay`, `loop`
+// and `muted`.
 //
-//   <manimgx-player><script type="text/python"> …a scene… </script></manimgx-player>
+//   <manimgx-player controls><script type="text/python"> …a scene… </script></manimgx-player>
 //   player.source = code                                    (the film made again, time kept)
 
 import type { Engine, Player } from "./engine.js";
@@ -103,9 +105,9 @@ function begin(): Page {
 let films = 0;
 
 /** A scene written in Python, made in the page and played on a canvas by ManimGX's engine,
- *  with the engine's own controls. */
+ *  with the engine's own controls if it has `controls`. */
 export class ManimgxPlayer extends HTMLElement {
-  static observedAttributes = ["scene"];
+  static observedAttributes = ["scene", "controls", "loop", "muted"];
 
   #film = 0;
   #canvas: HTMLCanvasElement;
@@ -115,6 +117,7 @@ export class ManimgxPlayer extends HTMLElement {
   #wants: { time: number; playing: boolean | null } = { time: 0, playing: null };
   #begun = false;
   #failed = false;
+  #tabbed = false; // its tabindex is its own, not the page's
   #player: Player | null = null; // native GPU resources belong to one connected lifetime
   #connection: AbortController | undefined;
   #timer: number | undefined;
@@ -137,7 +140,6 @@ export class ManimgxPlayer extends HTMLElement {
   }
 
   connectedCallback(): void {
-    if (!this.hasAttribute("tabindex")) this.tabIndex = 0; // it takes keys
     if (this.#connection || this.#failed) return;
     this.#film = ++films; // late bytes from an earlier connection belong to its old decoder
     const connection = (this.#connection = new AbortController());
@@ -173,8 +175,14 @@ export class ManimgxPlayer extends HTMLElement {
     }
   }
 
-  attributeChangedCallback(): void {
-    if (this.#begun && this.#source !== null) this.#run();
+  attributeChangedCallback(name: string): void {
+    if (name === "scene") {
+      if (this.#begun && this.#source !== null) this.#run();
+      return;
+    }
+    if (name === "controls") this.#tab();
+    this.#heed(name);
+    this.#after();
   }
 
   /** The scene's Python source: set it, and the film is made again (the time kept). */
@@ -262,6 +270,7 @@ export class ManimgxPlayer extends HTMLElement {
     try {
       const { time, playing } = this.#wants;
       this.#player = new made.Player(canvas, time, playing ?? this.hasAttribute("autoplay"), MAC);
+      for (const name of ["controls", "loop", "muted"]) this.#heed(name);
       this.#player.resize(canvas.width, canvas.height, devicePixelRatio);
     } catch (error) {
       return this.#fail(error);
@@ -270,6 +279,27 @@ export class ManimgxPlayer extends HTMLElement {
     this.#wire(signal);
     for (const bytes of this.#backlog.splice(0)) this.#feed(bytes);
     this.#after();
+  }
+
+  /** Its `controls`, `loop` or `muted`, the player's. */
+  #heed(name: string): void {
+    const on = this.hasAttribute(name);
+    if (name === "controls") this.#player?.controls(on);
+    if (name === "loop") this.#player?.looping(on);
+    if (name === "muted") this.#player?.mute(on);
+  }
+
+  /** With its controls it takes keys: a stop in the page's tab order (unless the page set its
+   *  own `tabindex`); without them, it is none. */
+  #tab(): void {
+    if (this.hasAttribute("controls")) {
+      if (this.hasAttribute("tabindex")) return;
+      this.tabIndex = 0;
+      this.#tabbed = true;
+    } else if (this.#tabbed) {
+      this.removeAttribute("tabindex");
+      this.#tabbed = false;
+    }
   }
 
   #wait(): void {
@@ -342,10 +372,11 @@ export class ManimgxPlayer extends HTMLElement {
     on(canvas, "pointermove", (e) => p.pointer(...at(e)));
     on(canvas, "pointerdown", (e) => {
       if (pressed !== null || e.button !== 0 || !e.isPrimary) return false;
+      if (!p.press(...at(e), e.pointerType === "touch")) return false; // no controls: the page's
       pressed = e.pointerId;
       this.focus({ preventScroll: true });
       canvas.setPointerCapture(e.pointerId);
-      return p.press(...at(e), e.pointerType === "touch");
+      return true;
     });
     const end = (e: PointerEvent, ended: () => boolean | void): boolean | void => {
       if (e.pointerId !== pressed) return false;

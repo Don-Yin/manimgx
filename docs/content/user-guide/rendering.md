@@ -174,7 +174,7 @@ through your bundler, and put a scene in a `<manimgx-player>`:
   import "manimgx";
 </script>
 
-<manimgx-player autoplay>
+<manimgx-player controls autoplay>
   <script type="text/python">
     import manimgx as m
 
@@ -187,7 +187,9 @@ through your bundler, and put a scene in a `<manimgx-player>`:
 </manimgx-player>
 ```
 
-The player has the keys of the preview window. The first video on a page downloads
+With `controls`, the player has the controls and keys of the preview window. It takes a
+`<video>`'s `autoplay`, `loop` and `muted` too: `<manimgx-player autoplay loop muted>` plays
+like a GIF, with nothing over it. The first video on a page downloads
 Python ([Pyodide](https://pyodide.org)) and ManimGX, about 26 MB; the browser keeps them
 for later. It needs WebGPU: Chrome and Edge 113 or later, or Safari 26. Two things don't
 work in the browser yet: shapes made from other shapes, such as `Union`, and Chinese,

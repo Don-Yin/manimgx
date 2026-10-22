@@ -66,12 +66,16 @@ impl Clock {
         self.since = None;
     }
 
-    /// Keep it within the film: at its end, it stops there; past its last frame made (or a time
-    /// beyond it the clock was set to) while it is being made, it waits there, and runs on once
-    /// more is made.
-    fn bound(&mut self, made: f64, ended: bool) {
+    /// Keep it within the film: at its end, it stops there, or, `looping`, plays it again from
+    /// its start (true: it jumped); past its last frame made (or a time beyond it the clock was
+    /// set to) while it is being made, it waits there, and runs on once more is made.
+    fn bound(&mut self, made: f64, ended: bool, looping: bool) -> bool {
         if !self.playing() || self.now() < made {
-            return;
+            return false;
+        }
+        if ended && looping && made > 0.0 {
+            self.set(0.0);
+            return true;
         }
         if ended {
             self.set(made);
@@ -80,6 +84,7 @@ impl Clock {
             self.time = self.time.max(made);
             self.since = Some(Instant::now());
         }
+        false
     }
 }
 
@@ -437,6 +442,8 @@ pub(crate) struct Player {
     captions: bool,
     fullscreen: bool,
     mac: bool,
+    controls: bool,          // it shows its controls and takes its viewer's input
+    looping: bool,           // at its end, it plays the film again
     hidden: bool,            // it takes no picture: drawn again once it shows
     counting: bool,          // the frame drawn last has its see-through count coming back
     due: bool,               // to be drawn
@@ -467,6 +474,8 @@ impl Player {
             captions: false,
             fullscreen: false,
             mac: options.mac,
+            controls: true,
+            looping: false,
             hidden: false,
             counting: false,
             due: true,
@@ -570,6 +579,7 @@ impl Player {
     }
 
     pub(crate) fn play(&mut self) {
+        self.sound.resume(); // played in a gesture (a page's own button's too, as a <video> is): it may sound
         if self.take().is_some_and(|t| t.2) && self.time() >= self.made() - 1e-6 {
             self.seek(0.0); // from the start again
         }
@@ -666,6 +676,9 @@ impl Player {
     /// A key pressed: `key` is its value as the web names it (`" "`, `"k"`, `"ArrowLeft"`,
     /// `"Escape"`…). Whether the player took it.
     pub(crate) fn key(&mut self, key: &str, m: Modifiers) -> bool {
+        if !self.controls {
+            return false;
+        }
         self.sound.resume(); // a key pressed: the page may sound now
         let Some(act) = keyed(key, m, self.clock.playing(), self.help || self.fullscreen, self.mac) else { return false };
         self.act(act);
@@ -693,6 +706,9 @@ impl Player {
 
     /// The pointer moved to (x, y): pixels from the screen's top left.
     pub(crate) fn pointer(&mut self, x: f64, y: f64) {
+        if !self.controls {
+            return;
+        }
         self.cursor = (x, y);
         self.active = Some(Instant::now());
         self.due = true;
@@ -706,6 +722,9 @@ impl Player {
     /// The pointer pressed (a finger, if `touch`) at (x, y), pixels from the screen's top left.
     /// Whether the player took it.
     pub(crate) fn press(&mut self, x: f64, y: f64, touch: bool) -> bool {
+        if !self.controls {
+            return false;
+        }
         self.sound.resume();
         // what showed before it (a finger comes down where nothing pointed)
         let shown = self.shows_controls();
@@ -789,6 +808,9 @@ impl Player {
     /// sideways it moves the playhead, a second per 100 points; else the player lets it go by
     /// (the page scrolls). Whether it took it.
     pub(crate) fn wheel(&mut self, dx: f64, dy: f64) -> bool {
+        if !self.controls {
+            return false;
+        }
         if matches!(self.pointer, Pointer::Over(Some(Control::Mute))) && dy.abs() > dx.abs() {
             self.wheeled -= dy;
             let steps = (self.wheeled / 50.0).trunc();
@@ -840,6 +862,34 @@ impl Player {
         self.due = true;
     }
 
+    /// It shows its controls and takes its viewer's keys, pointer and wheel, or not: a picture
+    /// that plays (its status and errors still show), its page handling every event.
+    #[cfg(feature = "web")]
+    pub(crate) fn controls(&mut self, on: bool) {
+        if !on {
+            self.cancel(); // a drag ends where it is
+            self.help = false;
+        }
+        self.controls = on;
+        self.due = true;
+    }
+
+    /// At the film's end, it plays it again from its start, or stops there.
+    #[cfg(feature = "web")]
+    pub(crate) fn looping(&mut self, on: bool) {
+        self.looping = on;
+    }
+
+    /// Its sound muted, or not. Unmuted (by a page, in its viewer's gesture), it may sound.
+    #[cfg(feature = "web")]
+    pub(crate) fn mute(&mut self, on: bool) {
+        if self.sound.muted && !on {
+            self.sound.resume();
+        }
+        self.sound.muted = on;
+        self.due = true;
+    }
+
     /// What it asks of its screen, since it was last asked.
     pub(crate) fn asks(&mut self) -> Vec<Ask> {
         std::mem::take(&mut self.asks)
@@ -850,7 +900,7 @@ impl Player {
     fn shows_controls(&self) -> bool {
         let lately = self.active.is_some_and(|at| at.elapsed() < IDLE);
         let on = matches!(self.pointer, Pointer::Over(Some(_)) | Pointer::Dragging { .. } | Pointer::Down { on: Some(_), .. });
-        self.takes.shown.is_some() && (!self.clock.playing() || self.waits() || lately || on || self.help)
+        self.controls && self.takes.shown.is_some() && (!self.clock.playing() || self.waits() || lately || on || self.help)
     }
 
     /// What the face shows now, at `time`.
@@ -924,7 +974,9 @@ impl Player {
     pub(crate) fn draw(&mut self, presenting: impl FnOnce()) -> Result<(), String> {
         self.due = false;
         let (made, ended, playing) = (self.made(), self.take().is_some_and(|t| t.2), self.clock.playing());
-        self.clock.bound(made, ended);
+        if self.clock.bound(made, ended, self.looping) {
+            self.sound.jumped();
+        }
         let time = self.time();
         let shown = self.takes.show(time);
         self.notes.retain(|&take, _| take >= shown); // a take replaced goes, its notes with it
@@ -1034,5 +1086,25 @@ mod tests {
             notes.take(Said { section: Some(Section { name: name.into(), start }), ..Said::default() });
         }
         assert_eq!(notes.chapters(3.0), [(0.0, 1.0, "Intro".into()), (1.0, 2.0, "Middle".into()), (2.0, 3.0, "End".into())]);
+    }
+
+    #[test]
+    fn at_the_films_end_the_clock_stops_or_plays_it_again() {
+        // run from 0 for 5 seconds: past a film of 3
+        let ran = Clock { time: 0.0, since: Some(Instant::now() - Duration::from_secs(5)), rate: 1.0 };
+        let mut clock = ran;
+        assert!(!clock.bound(3.0, true, false));
+        assert!(!clock.playing() && (clock.time - 3.0).abs() < 0.1);
+        let mut clock = ran;
+        assert!(clock.bound(3.0, true, true));
+        assert!(clock.playing() && clock.now() < 1.0);
+        // a film still being made waits at its last frame, looping or not
+        let mut clock = ran;
+        assert!(!clock.bound(3.0, false, true));
+        assert!(clock.playing() && clock.now() >= 3.0 && clock.now() < 4.0);
+        // with no frame yet, there is nothing to play again
+        let mut clock = ran;
+        assert!(!clock.bound(0.0, true, true));
+        assert!(!clock.playing() && clock.time < 0.1);
     }
 }

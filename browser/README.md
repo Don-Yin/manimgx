@@ -13,7 +13,7 @@ npm install manimgx
   import "manimgx";
 </script>
 
-<manimgx-player autoplay>
+<manimgx-player controls autoplay>
   <script type="text/python">
     import manimgx as m
 
@@ -41,6 +41,9 @@ document.body.append(player);
   WebAssembly draws the film with WebGPU, and its face over it: the controls, the time, the
   timeline in the scene's plays (each named by its line of code), captions, the scene's error
   and the keys (`?` lists them), all in ManimGX's fonts. A click, a tap and a key do the same.
+- **A `<video>`'s attributes**: `controls` (without them, the player is a picture that plays,
+  and every click, key and wheel is the page's), `autoplay`, `loop` and `muted`.
+  `<manimgx-player autoplay loop muted>` plays a scene as a GIF does.
 - **Any frame, at once**: the film is recorded as it is made (a *take*: each shape once, then
   each frame), and any moment of it is drawn at once, so it plays before the scene has
   finished and seeks instantly. Each frame is drawn at the size the page shows it, in the

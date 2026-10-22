@@ -121,6 +121,22 @@ impl Player {
         self.player.fullscreen(on);
     }
 
+    /// Its controls, as `<video controls>`: it shows them and takes its viewer's keys, pointer
+    /// and wheel, or it is a picture that plays, the page handling every event.
+    pub fn controls(&mut self, on: bool) {
+        self.player.controls(on);
+    }
+
+    /// As `<video loop>`: at the film's end, it plays it again from its start.
+    pub fn looping(&mut self, on: bool) {
+        self.player.looping(on);
+    }
+
+    /// As `<video muted>`: its sound muted, or not.
+    pub fn mute(&mut self, on: bool) {
+        self.player.mute(on);
+    }
+
     /// When to draw it next: 0, at the next animation frame; milliseconds from now; −1, once
     /// something happens.
     pub fn wake(&mut self) -> Result<f64, JsError> {
@@ -151,11 +167,12 @@ impl Player {
             .collect()
     }
 
-    /// The cursor over it, as CSS names it.
+    /// The cursor over it, as CSS names it; empty where it has none of its own (the page's shows:
+    /// an arrow, unless the page says otherwise).
     #[wasm_bindgen(getter)]
     pub fn cursor(&self) -> String {
         match self.player.cursor() {
-            Cursor::Arrow => "default",
+            Cursor::Arrow => "",
             Cursor::Hand => "pointer",
             Cursor::Hidden => "none",
         }

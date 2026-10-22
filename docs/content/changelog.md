@@ -26,6 +26,7 @@ The notable changes to ManimGX, release by release. The format follows
 - Add Manim CE's `partial_bezier_points`, `subdivide_bezier`, `bezier_remap`, `integer_interpolate`, `is_closed` and `get_smooth_cubic_bezier_handle_points` to the package.
 - Add `remove_fixed_in_frame_mobjects` to `ThreeDScene` and `Camera`, Manim CE's undo of `add_fixed_in_frame_mobjects`: the camera moves the mobjects again.
 - Add `get_height()`, deprecated in favor of `height`, as `get_width()` is in favor of `width`: Manim CE scenes call both.
+- Give `<manimgx-player>` a `<video>`'s `controls`, `loop` and `muted`, so `<manimgx-player autoplay loop muted>` plays a scene as a GIF does, with nothing over it ([#31](https://github.com/academa-labs/manimgx/issues/31)). A page's own buttons can play it with sound: `play()` and taking away `muted` let the page sound, as a click on the controls does.
 
 ### Changed
 
@@ -45,6 +46,7 @@ The notable changes to ManimGX, release by release. The format follows
 - Name the settings' module `manimgx.settings`. `manimgx.config` is the settings themselves, as `m.config` is: after `import manimgx.config`, `manimgx.config.Config` failed.
 - Name the value that says how a transform's points travel `Trajectory`, where it was `Path`, which `from manimgx import *` put in place of `pathlib.Path` ([#35](https://github.com/academa-labs/manimgx/issues/35)).
 - Name more of Manim CE's differences on the migration page: a fraction's glyph order, `line_spacing`, `rate_functions`, `pixel_array`, held frames and `ffmpeg -ss`, and a scene's own `say` ([#35](https://github.com/academa-labs/manimgx/issues/35)).
+- Show `<manimgx-player>`'s controls only with `controls`, as a `<video>` does: without them, the player takes no click, key or wheel, and is no stop in the page's tab order ([#31](https://github.com/academa-labs/manimgx/issues/31)).
 
 ### Fixed
 

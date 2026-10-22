@@ -18,6 +18,9 @@ export interface Player {
   resize(width: number, height: number, scale: number): void;
   hide(hidden: boolean): void;
   fullscreen(on: boolean): void;
+  controls(on: boolean): void;
+  looping(on: boolean): void;
+  mute(on: boolean): void;
   wake(): number;
   draw(): void;
   asks(): (["scene", string] | ["fullscreen", boolean])[];
