@@ -252,12 +252,11 @@ def typeset(
     packages: str | None = None,
     *,
     revision: int = 0,
-) -> tuple[bytes, list[bytes], list[tuple[str, list[int]]], bool, list[str]]:
+) -> tuple[bytes, list[bytes], list[tuple[str, list[int]]], bool]:
     """Typeset `source` (Typst): its items as float64 rows of 23 (kind, key, placement a b c d e f,
     fill rgba, stroke rgba, stroke width, advance, node start, end, drawn start, end, node kind),
     its shapes' cubic points (float64 x y z), its labelled groups (a label and the items inside
-    it), whether it needed the system's fonts, and the font families it names that no font
-    has. `revision` identifies the caller's font and
+    it) and whether it needed the system's fonts. `revision` identifies the caller's font and
     package dependencies; a changed revision replaces the setup remembered for those paths."""
 
 def glyph_outlines(keys: Sequence[int]) -> list[bytes]:

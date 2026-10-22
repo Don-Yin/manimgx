@@ -22,11 +22,9 @@ The notable changes to ManimGX, release by release. The format follows
 
 - Add a preview image and social metadata when sharing website and documentation links.
 - Credit Academa and the creators in the README.
-- Add `set_width()` and `set_height()`, deprecated in favor of setting `width` and `height`, as `get_width()` and `get_height()` are: Manim CE scenes size mobjects with them ([#35](https://github.com/academa-labs/manimgx/issues/35)).
 - Add Manim CE's `partial_bezier_points`, `subdivide_bezier`, `bezier_remap`, `integer_interpolate`, `is_closed` and `get_smooth_cubic_bezier_handle_points` to the package.
 - Add `remove_fixed_in_frame_mobjects` to `ThreeDScene` and `Camera`, Manim CE's undo of `add_fixed_in_frame_mobjects`: the camera moves the mobjects again.
 - Add `get_height()`, deprecated in favor of `height`, as `get_width()` is in favor of `width`: Manim CE scenes call both.
-- Give `<manimgx-player>` a `<video>`'s `controls`, `loop` and `muted`, so `<manimgx-player autoplay loop muted>` plays a scene as a GIF does, with nothing over it ([#31](https://github.com/academa-labs/manimgx/issues/31)). A page's own buttons can play it with sound: `play()` and taking away `muted` let the page sound, as a click on the controls does.
 
 ### Changed
 
@@ -44,9 +42,6 @@ The notable changes to ManimGX, release by release. The format follows
 - Take NumPy out of the package: a scene imports it itself (`import numpy as np`), and `from manimgx import *` no longer brings `np`.
 - Make the voices' names the package's, as every other name is: `m.Fal`, `m.Voice`, `m.Word`, `m.timed`, `m.estimate` and `m.cached`, where they were `m.voices.Fal` and `manimgx.audio.Voice`. `m.voices` is gone.
 - Name the settings' module `manimgx.settings`. `manimgx.config` is the settings themselves, as `m.config` is: after `import manimgx.config`, `manimgx.config.Config` failed.
-- Name the value that says how a transform's points travel `Trajectory`, where it was `Path`, which `from manimgx import *` put in place of `pathlib.Path` ([#35](https://github.com/academa-labs/manimgx/issues/35)).
-- Name more of Manim CE's differences on the migration page: a fraction's glyph order, `line_spacing`, `rate_functions`, `pixel_array`, held frames and `ffmpeg -ss`, and a scene's own `say` ([#35](https://github.com/academa-labs/manimgx/issues/35)).
-- Show `<manimgx-player>`'s controls only with `controls`, as a `<video>` does: without them, the player takes no click, key or wheel, and is no stop in the page's tab order ([#31](https://github.com/academa-labs/manimgx/issues/31)).
 
 ### Fixed
 
@@ -56,8 +51,6 @@ The notable changes to ManimGX, release by release. The format follows
 - Make the folder a video or a storyboard is written in when it is missing (`render -o new/out.mp4`, `inspect -o new/sheet.png` and `Scene.render`), instead of failing with "No such file or directory" ([#34](https://github.com/academa-labs/manimgx/issues/34)).
 - Raise a ValueError, naming where it is, for a nested, unclosed or stray bracket in a `say` script, which was spoken and captioned ([#39](https://github.com/academa-labs/manimgx/issues/39)).
 - Time and caption speech in the pieces Unicode lets a line break between, so a `say` span in Chinese, Japanese or Thai, written without spaces, is timed by its own characters or words, where the whole sentence was one word ([#40](https://github.com/academa-labs/manimgx/issues/40)). Captions are the text as it is written, at most 42 columns wide (a Chinese or Japanese character takes two); a line never starts with a closing mark such as `，` or `」`, and ends where a sentence does, a quoted one too. A speech's words are found in its text by themselves, so a trimmed speech, or a voice that cuts its words its own way, no longer fails or mistimes a span; and an empty span after the last word starts where that word ends.
-- Find a font by any family name it lists, as font menus show it, not only by the one Typst reads: `Text(font="GenSenRounded2 TW")` found nothing, as the font's family is "GenSenRounded2 TW R" to Typst ([#33](https://github.com/academa-labs/manimgx/issues/33)). A family no font has, a typo too, is warned about, where its text quietly fell back to another font.
-- Draw with Direct3D 12 on Windows, as the docs said, not with a GPU's Vulkan driver, which the engine took first: Intel's crashed rendering ([#50](https://github.com/academa-labs/manimgx/issues/50)). Browsers draw WebGPU with Direct3D 12 on Windows too, and CI's Windows runners test it.
 - Show an image drawn smaller than its pixels as their mean: each pixel of the video shows the mean of the picture's pixels it covers, however the image is squashed and whatever its `resampling_algorithm`, where it showed the picture at one point, so thin lines broke up and small text was unreadable ([#36](https://github.com/academa-labs/manimgx/issues/36)). An image at its size or larger is drawn as before.
 - Keep resources needed by queued video frames until their transparency retries finish, fixing render failures during cache cleanup ([#16](https://github.com/academa-labs/manimgx/issues/16)).
 - Draw a storyboard picture without dropping the frame the film holds back, fixing `manimgx render` failures ("unknown shape") under memory pressure.
