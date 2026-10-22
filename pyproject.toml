@@ -141,7 +141,7 @@ before-all = [
     "sh scripts/release/build_lavapipe.sh {package}/src/manimgx/lavapipe",
 ]
 environment = { PATH = "$HOME/.cargo/bin:$PATH" }
-environment-pass = ["MANIMGX_SOURCES"]
+environment-pass = ["MANIMGX_SOURCES", "MANIMGX_COMPLETE_SOURCE"]
 repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel} && python {project}/scripts/release/linux_sources.py {dest_dir}"
 
 [tool.cibuildwheel.pyodide]

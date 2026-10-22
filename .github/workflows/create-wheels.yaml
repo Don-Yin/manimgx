@@ -57,10 +57,13 @@ jobs:
           --target wasm32-unknown-emscripten --target wasm32-unknown-unknown
 
       # cibuildwheel copies /project into its container; its documented /host mount
-      # lets the verified source store survive the container, alongside the wheel.
+      # lets the verified source store survive the container, alongside the wheel. It
+      # gathers the complete source: DXC's too, which only Windows builds read.
       - name: Retain the Linux builds' sources
         if: runner.os == 'Linux' && matrix.platform != 'pyodide'
-        run: echo "MANIMGX_SOURCES=/host${GITHUB_WORKSPACE}/sources" >> "${GITHUB_ENV}"
+        run: |
+          echo "MANIMGX_SOURCES=/host${GITHUB_WORKSPACE}/sources" >> "${GITHUB_ENV}"
+          echo "MANIMGX_COMPLETE_SOURCE=1" >> "${GITHUB_ENV}"
 
       - name: Build and test the wheel
         run: just build-wheel "${PLATFORM}"

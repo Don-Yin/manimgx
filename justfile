@@ -201,7 +201,7 @@ build-source sources="release-sources": build-sdist
     cp -R "${sources}" sources
     mkdir .cargo
     cargo vendor --locked --manifest-path rust/Cargo.toml vendor > .cargo/config.toml
-    printf '\n[net]\noffline = true\n\n[env]\nMANIMGX_SOURCES = { value = "sources", relative = true }\n' \
+    printf '\n[net]\noffline = true\n\n[env]\nMANIMGX_SOURCES = { value = "sources", relative = true }\nMANIMGX_COMPLETE_SOURCE = "1"\n' \
         >> .cargo/config.toml
     CARGO_TARGET_DIR="${work}/target" MANIMGX_SOURCES="$PWD/sources" \
         sh scripts/release/build_lavapipe.sh "${work}/lavapipe" --sources-only

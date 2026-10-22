@@ -32,6 +32,8 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+    env:
+      MANIMGX_SOURCES: ${{ github.workspace }}/sources
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -53,6 +55,14 @@ jobs:
           workspaces: rust
           shared-key: engine
           save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # The source store: the archives build scripts fetch, kept between runs, so a host
+      # that is down stops only a build whose pins changed (see `rust/fetch`).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: sources
+          key: sources-${{ hashFiles('rust/*/build.rs', 'rust/dxc/src/lib.rs') }}
+          restore-keys: sources-
 
       - name: Identify the rendered examples
         id: films

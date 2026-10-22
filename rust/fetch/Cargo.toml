@@ -9,3 +9,7 @@ description = "Others' sources for a build script: fetched at build time, named 
 [dependencies]
 sha2 = "0.11.0"
 tempfile = "3.27.0"
+
+[dev-dependencies]
+# a test port bound before it listens: connections to it are refused, and it stays the test's
+socket2 = "0.6.5"

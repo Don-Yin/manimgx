@@ -164,9 +164,11 @@ fn a_source_that_temporarily_refuses_connections_recovers() {
     use std::time::Duration;
 
     let mut source = Source::new();
-    let reserved = TcpListener::bind("127.0.0.1:0").unwrap();
-    let address = reserved.local_addr().unwrap();
-    drop(reserved); // The first requests see a refused connection, not an HTTP error.
+    // The port is the test's throughout: bound, so no other socket is given it, but not listening
+    // yet, so the first requests see a refused connection, not an HTTP error.
+    let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+    socket.bind(&std::net::SocketAddr::from(([127, 0, 0, 1], 0)).into()).unwrap();
+    let address = socket.local_addr().unwrap().as_socket().unwrap();
     source.url = format!("http://{address}/tree.tar.gz");
     let archive = fs::read(source.path("served/tree.tar.gz")).unwrap();
     let (finished, stopped) = mpsc::channel();
@@ -174,7 +176,8 @@ fn a_source_that_temporarily_refuses_connections_recovers() {
         if stopped.recv_timeout(Duration::from_secs(2)).is_ok() {
             return; // A downloader without retries already failed.
         }
-        let listener = TcpListener::bind(address).unwrap();
+        socket.listen(1).unwrap();
+        let listener = TcpListener::from(socket);
         listener.set_nonblocking(true).unwrap();
         loop {
             match listener.accept() {
