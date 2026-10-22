@@ -220,7 +220,7 @@ Open the video for the user, and tell them its path: `open SquareToCircle.mp4` o
 - Style: `color=m.YELLOW`, `fill_opacity=0.5`, `stroke_width=6`, `font_size=48`. A white background: `m.config.background_color = m.WHITE` after the import.
 - Graphs: `axes = m.Axes(x_range=[-3, 3], y_range=[-2, 2])`, then `axes.plot(lambda x: x**2, color=m.BLUE)`.
 - Sound: `self.add_sound("click.wav")` starts a sound now; `self.play(m.FadeIn(mob), m.Sound("whoosh.mp3"))` plays one with an animation.
-- Narration: `self.say("The derivative of [x squared] is [two x].", m.Indicate(a), m.Write(b))` speaks and plays each animation during its bracketed words; a scene's voice is `voice = m.voices.Fal("<model>", ...)` (fal.ai's text-to-speech, keyed by the environment variable FAL_KEY), by default ElevenLabs' Eleven v3, or any function from text to `m.Speech`.
+- Narration: `self.say("The derivative of [x squared] is [two x].", m.Indicate(a), m.Write(b))` speaks and plays each animation during its bracketed words; a scene's voice is `voice = m.Fal("<model>", ...)` (fal.ai's text-to-speech, keyed by the environment variable FAL_KEY), by default ElevenLabs' Eleven v3, or any function from text to `m.Speech`.
 - Slides: `self.next_section("name")` between plays; `manimgx present scene.py` opens them in the browser.
 
 ## 6. Look it up

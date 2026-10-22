@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from manimgx.cli.scenes import load, report_error, scene
-from manimgx.config import Config, config
+from manimgx.settings import Config, config
 
 
 def test_scene_edits_are_read_even_when_bytecode_metadata_matches(

@@ -48,8 +48,8 @@ from tests.strategies import MOBJECTS, angles
 import manimgx as m
 from manimgx import caches
 from manimgx.animation import clock
-from manimgx.config import config
 from manimgx.drawing.geometry import bezier_remap
+from manimgx.settings import config
 
 SLACK = 0.1
 """A law's allowance over proportion, for what a thing's fixed costs and manimgx's memories

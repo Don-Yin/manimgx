@@ -42,13 +42,11 @@
     {% with obj = class, docstring_sections = sections %}
       {% include "mx/lead.html.jinja" with context %}
     {% endwith %}
-    {# the call, by the name a scene reaches the class by: `m.Circle`, `m.voices.Fal`; a class
+    {# the call, by the name a scene reaches the class by: `m.Circle`, `m.Fal`; a class
        the package doesn't export (a configuration's, a clip's) is not made by a scene #}
     {% set top = class.package.members %}
     {% if class.name in top and not top[class.name].is_module %}
       {% set reach = "m." %}
-    {% elif "audio" in top and class.name in top["audio"].members %}
-      {% set reach = "m.voices." %}
     {% else %}
       {% set reach = none %}
     {% endif %}

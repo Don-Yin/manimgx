@@ -25,8 +25,8 @@ from hypothesis import strategies as st
 
 import manimgx as m
 from manimgx.audio import fal
-from manimgx.audio import sound as voices
 from manimgx.audio.fal import Fal
+from manimgx.audio.sound import _identity, _wav
 
 AUDIO_URL = "https://v3b.fal.media/files/b/speech.wav"
 SECOND_TENTH = 4800  # samples: a tenth of a second at the film's rate
@@ -50,7 +50,7 @@ class Service:
     ) -> bytes:
         self.asked.append((url, body, headers))
         if body is None:
-            return voices._wav(np.full((SECOND_TENTH, 1), 0.1, np.float32))
+            return _wav(np.full((SECOND_TENTH, 1), 0.1, np.float32))
         return json.dumps({"audio": {"url": AUDIO_URL}, **self.reply}).encode()
 
     @property
@@ -142,14 +142,14 @@ class TestNaming:
         other = data.draw(settings_of(model), label="other settings")
         voice = untyped(model, key=key, **settings)
         again = untyped(model, **written_otherwise(settings))
-        assert voices._identity(voice) == voices._identity(again)
+        assert _identity(voice) == _identity(again)
         assert repr(voice) == repr(again)
         assert voice == again
         same = json.dumps(other, sort_keys=True) == json.dumps(settings, sort_keys=True)
-        named = voices._identity(untyped(model, **other))
-        assert (named == voices._identity(voice)) == same
+        named = _identity(untyped(model, **other))
+        assert (named == _identity(voice)) == same
         for another in fal._MODELS.keys() - {model}:
-            assert voices._identity(Fal(another)) != voices._identity(voice)
+            assert _identity(Fal(another)) != _identity(voice)
 
 
 class TestTiming:

@@ -21,7 +21,7 @@ from hypothesis import HealthCheck, Phase, settings
 
 from manimgx import caches
 from manimgx.animation import clock
-from manimgx.config import config
+from manimgx.settings import config
 
 settings.register_profile(
     "default", deadline=None

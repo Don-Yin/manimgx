@@ -22,9 +22,9 @@ from manimgx.cli.diagnostics import (
     text_of,
     view,
 )
-from manimgx.config import config
 from manimgx.rendering.film import Film, Play
 from manimgx.scene import Scene, _written
+from manimgx.settings import config
 
 # a tile's area: 1080p halved each way (reduced exactly: sharp text), two to a sheet's row — in
 # the scene's shape, so a sheet costs the same image tokens whatever the shape

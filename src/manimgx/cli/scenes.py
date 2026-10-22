@@ -20,7 +20,6 @@ from rich.console import Console
 
 import manimgx
 from manimgx.animation.timeline import Animation
-from manimgx.config import Config, config
 from manimgx.rendering.film import (
     DEFAULT_ENCODER_CRF,
     DEFAULT_ENCODER_PRESET,
@@ -30,6 +29,7 @@ from manimgx.rendering.film import (
     X264Preset,
 )
 from manimgx.scene import Scene
+from manimgx.settings import Config, config
 
 
 @dataclass(frozen=True, slots=True)

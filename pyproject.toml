@@ -244,8 +244,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# the re-export hub: the package's public names
-"src/manimgx/__init__.py" = ["F401", "F403"]
+# the packages' re-exports: each takes in its children's names
+"src/manimgx/**/__init__.py" = ["F403"]
 # the command line starts the GPU for a command that draws before its modules load
 "src/manimgx/cli/__init__.py" = ["E402"]
 # the benchmark's scenes in Manim CE and ManimGL, in their idioms: everything from one import,

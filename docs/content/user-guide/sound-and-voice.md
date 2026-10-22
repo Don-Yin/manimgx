@@ -73,13 +73,13 @@ fal.ai key in the `FAL_KEY` environment variable. To choose a different voice, s
 `voice` in the scene's class, next to `construct`:
 
 ```py
-voice = m.voices.Fal(
+voice = m.Fal(
     "fal-ai/minimax/speech-2.8-hd",
     voice_setting={"voice_id": "Calm_Woman", "emotion": "happy"},
 )
 ```
 
-[`Fal`][manimgx.audio.fal.Fal] speaks with [five models][manimgx.audio.fal], and your
+[`Fal`][manimgx.Fal] speaks with [five models][manimgx.audio.fal], and your
 editor shows the settings of each one. Any other text-to-speech service can be a voice
 too: a voice is a function from text to a [`Speech`][manimgx.Speech]. For a dialogue,
 give `say` a voice for one line: `self.say("Hello!", voice=other)`.

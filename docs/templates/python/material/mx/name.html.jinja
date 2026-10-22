@@ -15,7 +15,6 @@
   {%- if parent is none or not parent.is_class -%}
     {%- set top = obj.package.members -%}
     {%- if obj.name in top -%}m.
-    {%- elif "audio" in top and obj.name in top["audio"].members -%}m.voices.
     {%- else -%}{{ parent.path }}.
     {%- endif -%}
   {%- elif "classmethod" in obj.labels or "staticmethod" in obj.labels -%}

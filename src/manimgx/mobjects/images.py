@@ -6,7 +6,6 @@ from warnings import deprecated
 
 import numpy as np
 
-from manimgx.config import config
 from manimgx.constants import DOWN, LEFT, RIGHT, UP, Resampling
 from manimgx.drawing.paint import (
     WHITE,
@@ -19,6 +18,7 @@ from manimgx.drawing.paint import (
     _Style,
 )
 from manimgx.mobject import MeshMobject
+from manimgx.settings import config
 
 __all__ = ["ImageMobject", "ImageMobjectFromCamera"]
 

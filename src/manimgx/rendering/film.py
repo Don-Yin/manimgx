@@ -17,9 +17,11 @@ from warnings import deprecated
 
 from manimgx import _engine
 from manimgx.animation import clock
-from manimgx.config import config
 from manimgx.rendering import feed
 from manimgx.rendering.feed import CameraView, Feeder
+from manimgx.settings import config
+
+__all__ = ["Film"]
 
 if TYPE_CHECKING:
     import numpy as np
@@ -382,7 +384,7 @@ class Film:
     def captions(self) -> list[Caption]:
         """The film's captions, in order of their start: those the scene added, and its
         speech's, a line of a few words at a time as they are said."""
-        from manimgx.audio import Speech, lines
+        from manimgx.audio.sound import Speech, lines
 
         spoken = [
             Caption(float(clip.start) + a, float(clip.start) + b, text)

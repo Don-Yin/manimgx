@@ -18,8 +18,8 @@ import pytest
 import manimgx as m
 from manimgx._engine import decode_audio, resample_audio
 from manimgx.audio.sound import RATE
-from manimgx.config import config
 from manimgx.rendering.film import X264Preset
+from manimgx.settings import config
 
 
 def impulse() -> m.Sound:

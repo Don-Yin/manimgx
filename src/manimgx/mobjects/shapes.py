@@ -17,7 +17,6 @@ from warnings import deprecated
 
 import numpy as np
 
-from manimgx.config import config
 from manimgx.constants import (
     DEFAULT_ARROW_TIP_LENGTH,
     DEFAULT_DASH_LENGTH,
@@ -78,6 +77,7 @@ from manimgx.mobject import (
     prototype,
     style_defaults,
 )
+from manimgx.settings import config
 from manimgx.typing import Point3DLike
 
 __all__ = [

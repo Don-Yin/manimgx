@@ -19,7 +19,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 import manimgx as m
-from manimgx.config import Config
+from manimgx.settings import Config
 
 pixels = st.integers(16, 4096)
 

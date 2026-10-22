@@ -37,9 +37,9 @@ from manimgx.cli.scenes import (
     report_error,
     scenes,
 )
-from manimgx.config import config
 from manimgx.rendering.film import Cut
 from manimgx.rendering.window import Window
+from manimgx.settings import config
 
 POLL = 0.02  # seconds between looks at the files
 

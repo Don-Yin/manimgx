@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, Literal, overload
 
 from typing_extensions import TypedDict
 
-from manimgx.config import config
 from manimgx.constants import DEGREES, DOWN, LEFT, OUT, RIGHT, UP
 from manimgx.drawing.paint import ManimColor, ParsableManimColor
 from manimgx.mobject import Mobject, ValueTracker
+from manimgx.settings import config
 
 if TYPE_CHECKING:
     from manimgx.animation.transform import Animate
@@ -643,7 +643,7 @@ class Scene:
 
         Args:
             video: The MP4 file to write, if any, at the size and frame rate of
-                [`config`][manimgx.config.config] (a whole number of frames a second,
+                [`config`][manimgx.config] (a whole number of frames a second,
                 and an even width and height); its folder is made if it is missing.
             preset: The x264 encoding preset; faster presets make larger files.
             crf: The x264 constant rate factor, from 0 to 51; lower values give
@@ -1163,7 +1163,7 @@ class Scene:
         It is handed `dt`, the scene time in seconds since it last ran (or was added),
         at each instant the scene computes, after the updaters of the mobjects. It steps
         as a mobject's time-based updater does: on the simulation clock
-        ([`config.simulation_rate`][manimgx.config.Config.simulation_rate] ticks a
+        ([`config.simulation_rate`][manimgx.settings.Config.simulation_rate] ticks a
         second, and the end of each play and wait), unless it is a
         [flow][manimgx.mobject.flow], which runs at every frame. What it returns is
         ignored.
@@ -1642,7 +1642,7 @@ class Scene:
             ```
         """
         from manimgx.animation.timeline import AnimationGroup, Succession, Wait
-        from manimgx.audio import spans, times
+        from manimgx.audio.sound import spans, times
 
         text, found = spans(script)
         if found and len(found) != len(animations):
@@ -1687,8 +1687,8 @@ class Scene:
 
     voice: Voice | None = None
     """Who speaks the scene's [`say`][manimgx.Scene.say]: any
-    [voice][manimgx.audio.Voice]; None for fal.ai's default model
-    ([`Fal()`][manimgx.audio.fal.Fal])."""
+    [voice][manimgx.Voice]; None for fal.ai's default model
+    ([`Fal()`][manimgx.Fal])."""
 
     def add_sound(
         self,

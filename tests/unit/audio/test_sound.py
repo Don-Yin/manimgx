@@ -1,4 +1,4 @@
-"""Sound placement and edits, and speech timing, captions and voices."""
+"""Sound placement and edits, and speech timing, captions and sound."""
 
 import re
 import unicodedata
@@ -14,14 +14,15 @@ from hypothesis import strategies as st
 
 import manimgx as m
 from manimgx.animation import clock
-from manimgx.audio import sound as voices
 from manimgx.audio.sound import (
     CUT,
     RATE,
     Clip,
     Speech,
     Word,
+    _identity,
     _pieces,
+    _wav,
     cached,
     estimate,
     lines,
@@ -30,7 +31,7 @@ from manimgx.audio.sound import (
     timed,
     times,
 )
-from manimgx.config import config
+from manimgx.settings import config
 
 
 def tone(seconds: float = 0.1, level: float = 0.5) -> m.Sound:
@@ -542,7 +543,7 @@ class TestSay:
 
     @pytest.mark.parametrize("speaker", [spelled, untimed], ids=["timed", "estimated"])
     def test_an_animation_starts_on_its_character_in_text_without_spaces(
-        self, speaker: voices.Voice
+        self, speaker: m.Voice
     ) -> None:
         begun: list[Fraction] = []
         spoken: list[Speech] = []
@@ -578,7 +579,7 @@ class TestVoice:
 @pytest.mark.usefixtures("cache_here")
 class TestCache:
     def test_function_identity_keeps_code_but_not_source_locations(self) -> None:
-        def voice(source: str, filename: str) -> voices.Voice:
+        def voice(source: str, filename: str) -> m.Voice:
             scope: dict[str, object] = {
                 "__name__": "recorded_voice",
                 "speak": said,
@@ -586,20 +587,17 @@ class TestCache:
                 "second_speaker": said,
             }
             exec(compile(source, filename, "exec"), scope)
-            return cast("voices.Voice", scope["voice"])
+            return cast("m.Voice", scope["voice"])
 
         source = (
             "def voice(text):\n    return speak(' '.join(w for w in text.split()))\n"
         )
-        original = voices._identity(voice(source, "first.py"))
-        assert voices._identity(voice("\n\n" + source, "second.py")) == original
-        assert (
-            voices._identity(voice(source.replace("' '", "'_'"), "first.py"))
-            != original
-        )
+        original = _identity(voice(source, "first.py"))
+        assert _identity(voice("\n\n" + source, "second.py")) == original
+        assert _identity(voice(source.replace("' '", "'_'"), "first.py")) != original
         first = "def voice(text):\n    return first_speaker(text)\n"
         second = first.replace("first_speaker", "second_speaker")
-        assert voices._identity(voice(first, "voice.py")) != voices._identity(
+        assert _identity(voice(first, "voice.py")) != _identity(
             voice(second, "voice.py")
         )
 
@@ -608,7 +606,7 @@ class TestCache:
         self, kind: str, cache_here: Path, tmp_path: Path
     ) -> None:
         samples = np.linspace(-0.5, 0.5, RATE, dtype=np.float32)
-        audio = voices._wav(samples)
+        audio = _wav(samples)
         path = tmp_path / "source.wav"
         path.write_bytes(audio)
 
@@ -664,7 +662,7 @@ class TestCache:
         silence_then_sound = np.concatenate(
             [np.zeros(RATE, np.float32), np.full(RATE, 0.5, np.float32)]
         )
-        audio.write_bytes(voices._wav(silence_then_sound[:, None]))
+        audio.write_bytes(_wav(silence_then_sound[:, None]))
         again = cached(said, "hello there", cache_here)
         assert again.words[0].start >= 0.9  # estimated from the recording, not kept
 
@@ -676,8 +674,8 @@ class TestCache:
             return voice
 
         slow, fast, again = speaking(1.0), speaking(1.5), speaking(1.0)
-        assert voices._identity(slow) != voices._identity(fast)
-        assert voices._identity(slow) == voices._identity(again)
+        assert _identity(slow) != _identity(fast)
+        assert _identity(slow) == _identity(again)
 
         class Called:  # a callable object: named by its fields, not its address
             def __init__(self, voice_id: str) -> None:
@@ -686,8 +684,8 @@ class TestCache:
             def __call__(self, text: str) -> Speech:
                 return said(text)
 
-        assert voices._identity(Called("a")) == voices._identity(Called("a"))
-        assert voices._identity(Called("a")) != voices._identity(Called("b"))
+        assert _identity(Called("a")) == _identity(Called("a"))
+        assert _identity(Called("a")) != _identity(Called("b"))
 
 
 @pytest.mark.usefixtures("cache_here")

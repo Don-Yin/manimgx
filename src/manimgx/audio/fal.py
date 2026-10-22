@@ -28,6 +28,8 @@ from typing_extensions import TypedDict
 
 from manimgx.audio.sound import Speech, timed
 
+__all__ = ["Fal"]
+
 # ── the models' settings, as their schemas on fal have them ────────────────────────────────
 
 
@@ -457,7 +459,7 @@ class Fal:
         A scene's voice, in its class:
 
         ```py
-        voice = m.voices.Fal(
+        voice = m.Fal(
             "fal-ai/minimax/speech-2.8-hd",
             voice_setting={"voice_id": "Calm_Woman", "speed": 1.1},
         )

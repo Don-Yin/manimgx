@@ -25,7 +25,7 @@ from typing_extensions import TypedDict
 
 from manimgx.caches import Memo, unchanged
 from manimgx.constants import UL, CapStyleType, LineJointType
-from manimgx.drawing.geometry import interpolate
+from manimgx.drawing.geometry import Floats, interpolate
 from manimgx.typing import RGBA_Array, Vector3D, Vector3DLike
 
 __all__ = [
@@ -121,7 +121,6 @@ __all__ = [
     "YELLOW_D",
     "YELLOW_E",
     "Colorscale",
-    "Floats",
     "ManimColor",
     "Material",
     "ParsableManimColor",
@@ -139,11 +138,9 @@ __all__ = [
     "random_color",
     "rgb_to_color",
     "rgbas_by_value",
+    "stretch_array_to_length",
     "to_oklab",
 ]
-
-type Floats = npt.NDArray[np.float64]
-"""A NumPy array of floats."""
 
 # ── mixing: one rule for every blend of colors ─────────────────────────────────
 # Colors mix in OKLab, where lightness moves evenly (the midpoint of two colors sits exactly

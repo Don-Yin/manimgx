@@ -139,7 +139,7 @@ import dataclasses, importlib.util, json, linecache, shutil, sys, traceback
 from pathlib import Path
 from pyodide.ffi import to_js
 from manimgx import _engine
-from manimgx.config import Config, config
+from manimgx.settings import Config, config
 from manimgx.scene import Scene
 
 FILMS = Path("/home/pyodide/films")

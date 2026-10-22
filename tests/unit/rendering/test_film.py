@@ -19,8 +19,8 @@ from hypothesis import strategies as st
 import manimgx as m
 from manimgx.audio import Speech, Word
 from manimgx.audio.sound import RATE
-from manimgx.config import config
 from manimgx.rendering.film import Frame
+from manimgx.settings import config
 
 
 def film_of(

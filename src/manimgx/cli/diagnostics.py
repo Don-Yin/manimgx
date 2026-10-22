@@ -9,11 +9,11 @@ from types import FrameType
 import numpy as np
 
 import manimgx
-from manimgx.config import config
 from manimgx.constants import DL, UR
 from manimgx.drawing.geometry import subpath_ranges
 from manimgx.mobject import Mobject
 from manimgx.scene import Scene
+from manimgx.settings import config
 
 PACKAGE = str(Path(manimgx.__file__).parent)
 

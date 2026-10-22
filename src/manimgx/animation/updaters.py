@@ -486,7 +486,7 @@ class TracedPath(VMobject):
 
     `traced_point_func` gives the point. The path records where it is at every tick of
     the simulation clock
-    ([`config.simulation_rate`][manimgx.config.Config.simulation_rate] times a second)
+    ([`config.simulation_rate`][manimgx.settings.Config.simulation_rate] times a second)
     and at the end of each play and wait, so it is the same path at any frame rate; at a
     frame between two ticks, it runs on to where the point is then. It traces while it
     is in the scene, from when it joins it, and at each instant once everything else

@@ -16,8 +16,8 @@ import numpy as np
 import pytest
 
 import manimgx as m
-from manimgx.config import config
 from manimgx.rendering.film import Frame
+from manimgx.settings import config
 
 W, H = 640, 360
 

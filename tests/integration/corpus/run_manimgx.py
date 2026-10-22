@@ -27,8 +27,8 @@ from tests.integration.corpus.frames import Comparison, Difference, Movie, Recor
 from tests.integration.corpus.runtime import load, seed, the_scene, write_result
 
 import manimgx
-from manimgx.config import Config, config
 from manimgx.rendering.film import Frame
+from manimgx.settings import Config, config
 
 
 def render(

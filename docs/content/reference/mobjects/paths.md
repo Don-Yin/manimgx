@@ -193,6 +193,26 @@ corners, as a smooth curve through them, or one line and curve at a time.
     options:
       heading_level: 3
 
+::: manimgx.partial_bezier_points
+    options:
+      heading_level: 3
+
+::: manimgx.subdivide_bezier
+    options:
+      heading_level: 3
+
+::: manimgx.bezier_remap
+    options:
+      heading_level: 3
+
+::: manimgx.get_smooth_cubic_bezier_handle_points
+    options:
+      heading_level: 3
+
+::: manimgx.is_closed
+    options:
+      heading_level: 3
+
 ## Paths made from paths
 
 ::: manimgx.CubicBezier

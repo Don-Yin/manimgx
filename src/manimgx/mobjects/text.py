@@ -24,18 +24,14 @@ from warnings import deprecated
 __all__ = [
     "BulletedList",
     "MathTex",
-    "MathTexOptions",
     "MathTexPart",
     "MathTypst",
     "Paragraph",
     "SingleStringMathTex",
     "Tex",
     "Text",
-    "TextOptions",
     "Title",
     "Typst",
-    "TypstGlyph",
-    "TypstOptions",
 ]
 
 import bisect
@@ -1902,9 +1898,9 @@ class Title(Tex):
         underline_buff: float = MED_SMALL_BUFF,
         **kwargs: Unpack[MathTexOptions],
     ) -> None:
-        from manimgx.config import config
         from manimgx.constants import DOWN, LEFT, RIGHT, UP
         from manimgx.mobjects.shapes import Line
+        from manimgx.settings import config
 
         super().__init__(*text_parts, **kwargs)
         self.to_edge(UP)

@@ -9,9 +9,9 @@ from typing import cast
 import pytest
 
 import manimgx as m
-from manimgx.config import config
 from manimgx.rendering import feed
 from manimgx.rendering.film import Cut, Film, Frame, X264Preset
+from manimgx.settings import config
 
 
 class Held(m.Scene):

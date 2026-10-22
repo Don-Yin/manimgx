@@ -31,10 +31,10 @@ the scene is made; the command line's options set it too (`-r 1080x1920`, `--fps
 The frame has the video's shape, and its short side is 8 units: a wide video shows about
 14.2 × 8 units, a tall one 8 × 14.2, and the 8 × 8 square in the middle is in both.
 
-::: manimgx.config.config
+::: manimgx.config
     options:
       heading_level: 2
 
-::: manimgx.config.Config
+::: manimgx.settings.Config
     options:
       heading_level: 2

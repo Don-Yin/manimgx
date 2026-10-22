@@ -29,7 +29,6 @@ from typing import TYPE_CHECKING, ClassVar, Self, Unpack
 
 import numpy as np
 
-from manimgx.config import config
 from manimgx.constants import (
     DEFAULT_FONT_SIZE,
     DEFAULT_MOBJECT_TO_MOBJECT_BUFFER,
@@ -71,6 +70,7 @@ from manimgx.mobjects.text import (
     Text,
     TypstOptions,
 )
+from manimgx.settings import config
 from manimgx.typing import ManimTextLabel
 
 if TYPE_CHECKING:

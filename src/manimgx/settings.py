@@ -15,13 +15,15 @@ from manimgx import constants
 from manimgx.drawing.paint import BLACK, ManimColor, ParsableManimColor
 from manimgx.typing import Point3D, Vector3D
 
+__all__ = ["Degrees", "Munits", "Percent", "Pixels", "config"]
+
 
 @dataclass
 class Config:
     """The configuration scenes are made and rendered with: the video's size, frame rate
     and background, and the frame's size in scene units.
 
-    There is one, [`config`][manimgx.config.config]. Set its fields before making a
+    There is one, [`config`][manimgx.config]. Set its fields before making a
     scene: a scene's camera, and the mobjects that fill the frame, take their sizes and
     the background from it when they are made, and [`render`][manimgx.Scene.render]
     takes the video's size and frame rate when it starts. It can be read and set as a
@@ -173,7 +175,7 @@ class Config:
 
 config = Config()
 """The configuration every scene is made and rendered with, as `m.config`: a
-[`Config`][manimgx.config.Config]. Set its fields before making a scene:
+[`Config`][manimgx.settings.Config]. Set its fields before making a scene:
 `m.config.pixel_width, m.config.pixel_height = 1280, 720`."""
 
 

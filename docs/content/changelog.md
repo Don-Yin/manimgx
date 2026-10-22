@@ -22,6 +22,7 @@ The notable changes to ManimGX, release by release. The format follows
 
 - Add a preview image and social metadata when sharing website and documentation links.
 - Credit Academa and the creators in the README.
+- Add Manim CE's `partial_bezier_points`, `subdivide_bezier`, `bezier_remap`, `integer_interpolate`, `is_closed` and `get_smooth_cubic_bezier_handle_points` to the package.
 
 ### Changed
 
@@ -36,9 +37,13 @@ The notable changes to ManimGX, release by release. The format follows
 - Make `become` give a mobject another's value, member by member: each member takes its counterpart's points, shape and whole style (its joint and cap styles and 3D shading too), and stays itself, updaters and all, where the other has a member drawn as it is in its place; the members it gains come without updaters, and those it has beyond the other's go. What it was never shows through, becoming the same value again changes nothing, the other is left as it was, and a mobject can become itself or one of its own members. A group or a point cloud that becomes a shape holds the shape in a first member. It is faster too.
 - End a transform as its target: its mobject becomes the keyframe its last frame shows, so the points and parts its frames gained on the way never outlive it. A morph that follows another starts from the shape the first ended on, not from that shape divided as the first needed it; `Restore` brings back exactly what was saved, and a remover leaves its mobject as it was. Transforms played together on one mobject still compose. Films that chain morphs change slightly.
 - Play `TransformFromCopy` forward: the target turns from the mobject's copy into itself as any transform does, its rate function, `path_arc` and `lag_ratio` running from the copy to the target (they ran backward, the arcs bending the other way), and it ends exactly as itself.
+- Take NumPy out of the package: a scene imports it itself (`import numpy as np`), and `from manimgx import *` no longer brings `np`.
+- Make the voices' names the package's, as every other name is: `m.Fal`, `m.Voice`, `m.Word`, `m.timed`, `m.estimate` and `m.cached`, where they were `m.voices.Fal` and `manimgx.audio.Voice`. `m.voices` is gone.
+- Name the settings' module `manimgx.settings`. `manimgx.config` is the settings themselves, as `m.config` is: after `import manimgx.config`, `manimgx.config.Config` failed.
 
 ### Fixed
 
+- Give a type checker the package's names: each module lists the names it gives in `__all__`, and each package takes in its children's and gathers their lists, so `m.Scene`, `m.Text`, `m.config` and every other name are the package's, where they were reported as not exported ([#38](https://github.com/academa-labs/manimgx/issues/38)). `from manimgx import *` binds exactly those names, no longer the package's modules too: `manimgx.typing` took the place of the standard library's `typing`.
 - Redraw a shape that empties with `always_redraw` without a RecursionError, and keep a mobject's updaters off the member its points move into when a transform aligns it, so a relative updater such as `always_shift` no longer runs twice on them ([#32](https://github.com/academa-labs/manimgx/issues/32)).
 - Measure a text's size in `inspect` and `render` at 1080p, which is 1080 px on a video's short side, so a tall video (1080x1920) no longer reports readable text as small ([#37](https://github.com/academa-labs/manimgx/issues/37)).
 - Make the folder a video or a storyboard is written in when it is missing (`render -o new/out.mp4`, `inspect -o new/sheet.png` and `Scene.render`), instead of failing with "No such file or directory" ([#34](https://github.com/academa-labs/manimgx/issues/34)).

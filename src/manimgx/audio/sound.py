@@ -28,6 +28,8 @@ import json
 import re
 from collections.abc import Sequence
 
+__all__ = ["Sound", "Speech", "Voice", "Word", "cached", "estimate", "timed"]
+
 RATE = 48_000
 """The soundtrack's sample rate: 48,000 samples a second, as video's sound has."""
 CUT = 0.005
@@ -139,7 +141,7 @@ class Sound(Animation[Mobject]):
 
     def duck(self, decibels: float = 12) -> Self:
         """This sound dipping by `decibels` while anything speaks (while a
-        [`Speech`][manimgx.audio.Speech] plays): music under a narration. It eases down
+        [`Speech`][manimgx.Speech] plays): music under a narration. It eases down
         `DUCK_ATTACK` seconds before the speech and back up over `DUCK_RELEASE` after.
         """
         return self._but(duck=decibels)
@@ -368,7 +370,7 @@ class Speech(Sound):
     Args:
         source: The audio: a file's path, a file's bytes, or samples.
         text: What it says.
-        words: Each word and when it is said, if the voice knows ([`timed`][manimgx.audio.timed]
+        words: Each word and when it is said, if the voice knows ([`timed`][manimgx.timed]
             makes them from a voice's own timing); otherwise they are estimated from the audio.
         rate: The samples' rate; only for samples.
     """
@@ -408,7 +410,7 @@ class Speech(Sound):
 
 
 type Voice = Callable[[str], Speech]
-"""Anything that speaks: a function from text to [`Speech`][manimgx.audio.Speech]. Bring any
+"""Anything that speaks: a function from text to [`Speech`][manimgx.Speech]. Bring any
 text-to-speech: wrap its call in a function that returns `Speech(audio, text=text)`."""
 
 

@@ -9,14 +9,20 @@
   methods there as the mobject's.
 - Mutable mappings and numbers retain their key and value types through construction,
   updates, and animation proxies.
+- A package's names are those its modules declare in `__all__`, each once, so ty and
+  `from manimgx import *` find the same names, and no module or undeclared name among them.
 """
 
 import importlib
 import re
 from pathlib import Path
+from types import ModuleType
 
+import pytest
 from tests.typecheck import check
 from typing_extensions import is_typeddict
+
+import manimgx
 
 PACKAGE = Path(__file__).parents[2] / "src" / "manimgx"
 
@@ -232,3 +238,38 @@ def test_real_tracker_construction_cannot_claim_complex_storage(tmp_path: Path) 
         encoding="utf-8",
     )
     assert [line for _, line, _, _ in check([source])] == [2, 3, 5]
+
+
+@pytest.mark.parametrize(
+    "package",
+    [
+        manimgx,
+        manimgx.animation,
+        manimgx.audio,
+        manimgx.drawing,
+        manimgx.mobjects,
+        manimgx.rendering,
+    ],
+    ids=lambda package: package.__name__,
+)
+def test_a_package_gives_exactly_the_names_it_declares(package: ModuleType) -> None:
+    public = {
+        name
+        for name, value in vars(package).items()
+        if not name.startswith("_") and not isinstance(value, ModuleType)
+    }
+    assert len(set(package.__all__)) == len(package.__all__)
+    assert set(package.__all__) == public
+
+
+def test_ty_finds_every_name_of_the_package_through_its_star_import(
+    tmp_path: Path,
+) -> None:
+    scene = tmp_path / "scene.py"
+    scene.write_text(
+        "from manimgx import *\n\n"
+        + "".join(f"_ = {name}\n" for name in manimgx.__all__),
+        encoding="utf-8",
+    )
+    # deprecated names say so, and nothing else is reported
+    assert set(_ty(scene).values()) <= {"deprecated"}

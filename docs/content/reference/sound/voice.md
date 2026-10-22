@@ -51,10 +51,10 @@ captions.
 
 ## Voices
 
-The voices ManimGX brings are fal.ai's: `m.voices.Fal`, with the model you choose and its
+The voices ManimGX brings are fal.ai's: `m.Fal`, with the model you choose and its
 settings. Your editor shows each model's settings.
 
-::: manimgx.audio.fal.Fal
+::: manimgx.Fal
     options:
       heading_level: 3
 
@@ -111,22 +111,22 @@ settings. Your editor shows each model's settings.
 A voice is any function from a text to a [Speech][manimgx.Speech]: a sound that knows its
 words, and when each is said. Any text-to-speech service can be one.
 
-::: manimgx.audio.Voice
+::: manimgx.Voice
     options:
       heading_level: 3
 
-::: manimgx.audio.Word
+::: manimgx.Word
     options:
       heading_level: 3
 
-::: manimgx.audio.timed
+::: manimgx.timed
     options:
       heading_level: 3
 
-::: manimgx.audio.estimate
+::: manimgx.estimate
     options:
       heading_level: 3
 
-::: manimgx.audio.cached
+::: manimgx.cached
     options:
       heading_level: 3

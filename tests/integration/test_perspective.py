@@ -10,7 +10,7 @@ import pytest
 from tests import scenes
 
 import manimgx as m
-from manimgx.config import config
+from manimgx.settings import config
 
 SIZE = (320, 180)
 pytestmark = pytest.mark.config(pixel_width=SIZE[0], pixel_height=SIZE[1])

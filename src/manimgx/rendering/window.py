@@ -27,6 +27,8 @@ from warnings import deprecated
 from manimgx import _engine
 from manimgx.rendering.film import Cut
 
+__all__ = ["Window"]
+
 
 class Window:
     """ManimGX's player in a window on this machine's screen, which plays the takes it is sent.

@@ -24,8 +24,8 @@ import pytest
 from tests import oracles, scenes
 
 import manimgx as m
-from manimgx.config import config
 from manimgx.constants import Resampling
+from manimgx.settings import config
 
 W, H = 640, 360
 WIDTH = 40  # stroke width: h = 0.2 units

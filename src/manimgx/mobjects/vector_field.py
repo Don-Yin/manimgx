@@ -32,7 +32,6 @@ from manimgx.animation.timeline import (
     Succession,
     Untimed,
 )
-from manimgx.config import config
 from manimgx.constants import OUT, RIGHT, UP
 from manimgx.drawing.geometry import interpolate, inverse_interpolate, sigmoid
 from manimgx.drawing.paint import (
@@ -50,6 +49,7 @@ from manimgx.drawing.paint import (
 from manimgx.mobject import Mobject, VGroup, VMobject, flow
 from manimgx.mobjects.plotting import Axes
 from manimgx.mobjects.shapes import ArrowTips, Vector
+from manimgx.settings import config
 
 if TYPE_CHECKING:
     from manimgx.typing import FloatRGB, FloatRGB_Array, Point3D, Vector3D

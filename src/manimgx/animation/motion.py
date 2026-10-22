@@ -38,7 +38,6 @@ from manimgx.animation.timeline import (
     Succession,
     _gathered,
 )
-from manimgx.config import config
 from manimgx.constants import (
     DEFAULT_POINTWISE_FUNCTION_RUN_TIME,
     DEFAULT_STROKE_WIDTH,
@@ -61,6 +60,7 @@ from manimgx.drawing.geometry import (
 )
 from manimgx.drawing.paint import GREY, PURE_YELLOW, ParsableManimColor
 from manimgx.mobject import Group, Mobject, Pivot, VGroup, VMobject
+from manimgx.settings import config
 from manimgx.typing import Point3D, Point3DLike, Vector3DLike
 
 if TYPE_CHECKING:
@@ -120,7 +120,6 @@ __all__ = [
     "SpinInFromNothing",
     "SpiralIn",
     "Swap",
-    "Transform",
     "TransformFromCopy",
     "TypeWithCursor",
     "Uncreate",

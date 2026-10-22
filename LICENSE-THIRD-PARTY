@@ -8174,7 +8174,6 @@ manimgx 0.1.1: manimgx/animation/easing.py (MIT)
 manimgx 0.1.1: manimgx/animation/matching.py (MIT)
 manimgx 0.1.1: manimgx/animation/motion.py (MIT)
 manimgx 0.1.1: manimgx/animation/updaters.py (MIT)
-manimgx 0.1.1: manimgx/config.py (MIT)
 manimgx 0.1.1: manimgx/drawing/geometry.py (MIT)
 manimgx 0.1.1: manimgx/drawing/paint.py (MIT)
 manimgx 0.1.1: manimgx/mobject.py (MIT)
@@ -8189,6 +8188,7 @@ manimgx 0.1.1: manimgx/mobjects/svg.py (MIT)
 manimgx 0.1.1: manimgx/mobjects/three_d.py (MIT)
 manimgx 0.1.1: manimgx/mobjects/vector_field.py (MIT)
 manimgx 0.1.1: manimgx/scene.py (MIT)
+manimgx 0.1.1: manimgx/settings.py (MIT)
 -------------------------------------------------------------------------------
 MIT License
 

@@ -18,9 +18,9 @@ import pytest
 
 import manimgx as m
 from manimgx.animation import clock
-from manimgx.config import config
 from manimgx.mobject import flow
 from manimgx.scene import Act
+from manimgx.settings import config
 
 type Story = Callable[[Probe], None]
 type Trajectory = Callable[[Fraction], Fraction]

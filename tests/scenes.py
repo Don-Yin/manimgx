@@ -22,11 +22,11 @@ from hypothesis import strategies as st
 
 import manimgx as m
 from manimgx.animation import easing as rf
-from manimgx.config import config
 from manimgx.drawing.geometry import bezier_remap
 from manimgx.drawing.paint import Paint
 from manimgx.rendering.film import Frame
 from manimgx.scene import _tracks
+from manimgx.settings import config
 
 if TYPE_CHECKING:
     from manimgx.animation.transform import Transform

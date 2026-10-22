@@ -44,7 +44,6 @@ import numpy.typing as npt
 from isosurfaces import plot_isoline
 from typing_extensions import TypedDict
 
-from manimgx.config import config
 from manimgx.constants import (
     DEFAULT_ARROW_TIP_LENGTH,
     DEFAULT_DOT_RADIUS,
@@ -103,6 +102,7 @@ from manimgx.mobjects.shapes import (
     _Tipped,
 )
 from manimgx.mobjects.text import MathTex, MathTexOptions, Tex, Typst
+from manimgx.settings import config
 from manimgx.typing import ManimTextLabel, Vector3D
 
 if TYPE_CHECKING:

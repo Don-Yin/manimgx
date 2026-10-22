@@ -20,7 +20,7 @@ import pytest
 from tests import scenes
 
 import manimgx as m
-from manimgx.config import config
+from manimgx.settings import config
 
 type Direction = Literal["left", "right", "center"]
 type Place = tuple[float, float, float]  # scale, then shift x, y

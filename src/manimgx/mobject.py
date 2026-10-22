@@ -39,7 +39,6 @@ from typing_extensions import TypedDict
 from manimgx import caches
 from manimgx.animation import clock
 from manimgx.caches import Memo, unchanged
-from manimgx.config import config
 from manimgx.constants import (
     DEFAULT_MOBJECT_TO_EDGE_BUFFER,
     DEFAULT_MOBJECT_TO_MOBJECT_BUFFER,
@@ -103,6 +102,7 @@ from manimgx.drawing.paint import (
     parse_colors,
     stretch_array,
 )
+from manimgx.settings import config
 from manimgx.typing import (
     MatrixMN,
     PathFunc,

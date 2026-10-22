@@ -29,7 +29,6 @@ from manimgx.cli.scenes import (
     take,
 )
 from manimgx.cli.storyboard import Sheets, Watch, line
-from manimgx.config import config
 from manimgx.rendering.film import (
     DEFAULT_ENCODER_CRF,
     DEFAULT_ENCODER_PRESET,
@@ -40,6 +39,7 @@ from manimgx.rendering.film import (
     X264Preset,
 )
 from manimgx.scene import Scene
+from manimgx.settings import config
 
 if TYPE_CHECKING:
     from manimgx.animation.transform import Transform

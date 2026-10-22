@@ -268,6 +268,10 @@ often needs.
     options:
       heading_level: 3
 
+::: manimgx.integer_interpolate
+    options:
+      heading_level: 3
+
 ::: manimgx.midpoint
     options:
       heading_level: 3

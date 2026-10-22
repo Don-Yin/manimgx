@@ -10,6 +10,8 @@ code behaves. This page shows where it is different.
 - Every name is in the package: `import manimgx as m`, then `m.Circle`, or
   `from manimgx import *`. Manim CE's modules are not there: write
   `from manimgx import polylabel`, not `from manimgx.utils.polylabel import polylabel`.
+- NumPy is not in the package: import it yourself (`import numpy as np`). Manim CE's
+  `from manim import *` brings `np` with it; ManimGX's brings only ManimGX's names.
 - Render with `manimgx render scene.py MyScene`. Manim CE's quality flags (`-ql`, `-qh`,
   …) become `-r` (`--resolution`) and `--fps`. `manimgx inspect` writes a storyboard and checks 2D layouts without a video. See
   [Rendering and sharing](rendering.md).
