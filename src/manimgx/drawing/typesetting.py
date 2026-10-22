@@ -6,6 +6,7 @@ import functools
 import os
 import pickle
 import tempfile
+import warnings
 from dataclasses import dataclass
 from importlib.resources import files
 from importlib.util import find_spec
@@ -82,7 +83,7 @@ _CACHE = (
 # what made a layout, part of its key: the entry's format, and the engine's own file (a rebuilt
 # engine never reads a layout an older one made)
 _ENGINE = Path(_engine.__file__).stat()
-_VERSION = f"layout 4, engine {_ENGINE.st_size} {_ENGINE.st_mtime_ns}".encode()
+_VERSION = f"layout 5, engine {_ENGINE.st_size} {_ENGINE.st_mtime_ns}".encode()
 _CONTENT = 1 << 52  # glyph keys by content: exact in float64, apart from the engine's
 type Stored = tuple[
     np.ndarray,
@@ -90,7 +91,11 @@ type Stored = tuple[
     list[tuple[str, list[int]]],
     int,
     dict[int, tuple[bytes, bytes]],
+    list[str],
 ]
+_PACKAGE = str(
+    Path(__file__).parents[1]
+)  # ManimGX's files: a warning names the caller's line
 
 
 def typst_string(text: str) -> str:
@@ -122,7 +127,8 @@ def typeset(
 
     The document is set in the fonts ManimGX ships (Typst's own and the Noto faces),
     after those in `font_paths`; a system font is read only for a family the document
-    names that none of them has. A layout is kept in the current user's cache directory
+    names that none of them has. A font is found by any family name it lists; a family
+    no font has is warned about, and its text is set in another font. A layout is kept in the current user's cache directory
     (the browser's private filesystem in a page): the same document, with the same fonts
     and packages, is read back, not typeset again, in any process.
 
@@ -147,7 +153,12 @@ def typeset(
         stored = _typeset(source, fonts, packages, int.from_bytes(depends, "little"))
         if path is not None:
             _write(path, stored)
-    rows, shapes, labels, _, glyphs = stored
+    rows, shapes, labels, _, glyphs, missing = stored
+    for family in missing:
+        warnings.warn(
+            f"no font has the family name {family!r}: its text is set in another font",
+            skip_file_prefixes=(_PACKAGE,),
+        )
     records = {
         key: _glyph(key, points, carets) for key, (points, carets) in glyphs.items()
     }
@@ -209,7 +220,7 @@ def _typeset(
     source: str, fonts: tuple[str, ...], packages: str | None, revision: int
 ) -> Stored:
     """Typeset with Typst; every glyph's key by content, with its outline and carets along."""
-    raw, shapes, labels, system = _engine.typeset(
+    raw, shapes, labels, system, missing = _engine.typeset(
         source, fonts, packages, revision=revision
     )
     rows = np.frombuffer(raw).reshape(-1, ROW).copy()
@@ -252,4 +263,5 @@ def _typeset(
         labels,
         _engine.system_fonts_fingerprint() if system else 0,
         glyphs,
+        missing,
     )

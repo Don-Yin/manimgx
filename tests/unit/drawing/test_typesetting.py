@@ -14,7 +14,8 @@
 - A glyph without an outline is no part, and labels lose it; a paragraph's blank lines are
   empty lines.
 - Text is set in the fonts ManimGX ships, the same on every machine: every script finds a face
-  there (no .notdef glyph), and a system font is read only for a family a text names.
+  there (no .notdef glyph), and a system font is read only for a family a text names. A font is
+  found by any family name it lists; a family no font has is warned about.
 """
 
 import gc
@@ -45,7 +46,7 @@ from manimgx.mobject import _PROTOTYPES
 from manimgx.mobjects.text import TypstGlyph, _cut
 
 type Document = m.Typst | m.Paragraph
-type Answer = tuple[bytes, list[bytes], list[tuple[str, list[int]]], bool]
+type Answer = tuple[bytes, list[bytes], list[tuple[str, list[int]]], bool, list[str]]
 
 
 @pytest.mark.parametrize("coordinate", [None, -123, 456])
@@ -56,7 +57,7 @@ def test_optional_font_caret_coordinate_is_checked(
         p for p in Path(tc.FONTS[0]).glob("*.ttf") if p.name.startswith("NotoSans[")
     )
     source = '#set text(font: "Noto Sans")\nA'
-    rows, _, _, _ = _engine.typeset(source, [str(font.parent)])
+    rows, *_ = _engine.typeset(source, [str(font.parent)])
     glyph = int(np.frombuffer(rows).reshape(-1, tc.ROW)[0, tc.KEY]) % 65536
     # A complete font with one optional format-1 caret. Only its coordinate is
     # truncated; the font still loads and shapes normally through the real engine.
@@ -72,7 +73,7 @@ def test_optional_font_caret_coordinate_is_checked(
     struct.pack_into(">II", data, slot + 8, len(data), len(table))
     data.extend(table)
     (tmp_path / "font.ttf").write_bytes(data)
-    rows, _, _, _ = _engine.typeset(source, [str(tmp_path)])
+    rows, *_ = _engine.typeset(source, [str(tmp_path)])
     key = int(np.frombuffer(rows).reshape(-1, tc.ROW)[0, tc.KEY])
     assert _engine.ligature_carets(key) == ([] if coordinate is None else [coordinate])
 
@@ -172,7 +173,7 @@ scans = Path(tempfile.gettempdir()) / 'manimgx-fonts' if root is None else Path(
 layouts = t._CACHE
 before_scans = set(scans.glob('*.bin'))
 before_layouts = set(layouts.glob('*.layout'))
-rows, _, _, system = _engine.typeset('#set text(font:"Noto Sans")\nHello Ω', [sys.argv[1]])
+rows, _, _, system, _ = _engine.typeset('#set text(font:"Noto Sans")\nHello Ω', [sys.argv[1]])
 table = np.frombuffer(rows).reshape(-1, 23)
 keys = sorted(set(int(row[1]) for row in table if row[0] == 0))
 native = hashlib.sha256(rows + b''.join(_engine.glyph_outlines(keys))).hexdigest()
@@ -227,7 +228,7 @@ def test_concurrent_cache_writers_publish_complete_owned_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "entry.layout"
-    stored: tc.Stored = (np.zeros((100, tc.ROW)), [], [], 0, {})
+    stored: tc.Stored = (np.zeros((100, tc.ROW)), [], [], 0, {}, [])
     expected = pickle.dumps(stored, protocol=5)
     first_written, second_half, published = Event(), Event(), Event()
     write_bytes, replace = Path.write_bytes, os.replace
@@ -307,7 +308,7 @@ class Engine:
         rows[:, tc.FILL] = [0, 0, 0, 1]
         rows[:, tc.STROKE] = [-1, -1, -1, -1]
         rows[:, tc.ADVANCE] = 1000
-        return rows.tobytes(), [], [], False
+        return rows.tobytes(), [], [], False, []
 
     def change(self) -> None:
         """Change what it answered: the made-up font's carets."""
@@ -507,7 +508,7 @@ def test_a_glyph_without_an_outline_is_no_part_and_labels_lose_it(
         nonlocal calls
         calls += 1
         assert calls == 1, "the second construction must read its disk cache"
-        return raw, [horizontal.tobytes()], labels, False
+        return raw, [horizontal.tobytes()], labels, False, []
 
     def outlines(keys: Sequence[int]) -> list[bytes]:
         return [b"" if key == 981 else square.tobytes() for key in keys]
@@ -586,7 +587,7 @@ def _set(text: m.Text) -> tuple[list[int], bool]:
     preamble = tc.TYPST_TEMPLATE.format(
         text_size=tc.TYPST_COMPILATION_FONT_SIZE, preamble=text.typst_preamble
     )
-    rows, _, _, system = _engine.typeset(preamble + text.typst_code, tc.FONTS)
+    rows, _, _, system, _ = _engine.typeset(preamble + text.typst_code, tc.FONTS)
     table = np.frombuffer(rows).reshape(-1, tc.ROW)
     keys = table[table[:, tc.KIND] == tc.GLYPH, tc.KEY].astype(np.int64)
     return [int(k) % 65536 for k in keys], system
@@ -611,4 +612,14 @@ def test_every_script_is_set_in_a_font_manimgx_ships(text: str, font: str) -> No
 
 
 def test_a_system_font_is_read_only_by_name() -> None:
-    assert _set(m.Text("Hi", font="Open Sans"))[1]
+    # a family ManimGX doesn't ship is looked for among the system's fonts; no font has this one
+    with pytest.warns(UserWarning, match="no font has the family name 'no such font'"):
+        text = m.Text("Hi", font="No Such Font")
+    assert _set(text)[1]
+
+
+def test_a_font_is_found_by_any_family_name_it_lists() -> None:
+    # Noto Sans Hebrew lists "Noto Sans Hebrew Light" (its family, name ID 1) beside its
+    # typographic family, which Typst names it by
+    named = m.Text("שלום", font="Noto Sans Hebrew Light")
+    assert _set(named) == _set(m.Text("שלום", font="Noto Sans Hebrew"))

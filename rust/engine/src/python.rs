@@ -382,7 +382,7 @@ mod typesetting {
 
     /// A typeset document: its rows (float64), its shapes' cubic points, its labelled groups, and
     /// whether it needed the system's fonts.
-    type Layout = (Py<PyBytes>, Vec<Py<PyBytes>>, Vec<(String, Vec<usize>)>, bool);
+    type Layout = (Py<PyBytes>, Vec<Py<PyBytes>>, Vec<(String, Vec<usize>)>, bool, Vec<String>);
 
     /// Typeset `source` with the fonts in `font_paths` and Typst's own (a system font only by its
     /// family's name), and the packages under `packages` besides mitex's (the engine's own): its
@@ -391,10 +391,10 @@ mod typesetting {
     #[pyfunction]
     #[pyo3(signature = (source, font_paths, packages=None, *, revision=0))]
     pub(super) fn typeset(py: Python<'_>, source: String, font_paths: Vec<String>, packages: Option<String>, revision: u64) -> PyResult<Layout> {
-        let (rows, shapes, labels, system) = py.detach(|| core::typeset(source, &font_paths, packages.as_deref(), revision)).map_err(TypstError::new_err)?;
+        let (rows, shapes, labels, system, missing) = py.detach(|| core::typeset(source, &font_paths, packages.as_deref(), revision)).map_err(TypstError::new_err)?;
         let rows = PyBytes::new(py, bytemuck::cast_slice(&rows)).unbind();
         let shapes = shapes.iter().map(|s| PyBytes::new(py, bytemuck::cast_slice(s)).unbind()).collect();
-        Ok((rows, shapes, labels, system))
+        Ok((rows, shapes, labels, system, missing))
     }
 
     /// The system's fonts' fingerprint (every file under their directories: path, size, time), once

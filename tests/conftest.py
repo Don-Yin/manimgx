@@ -136,14 +136,16 @@ def two_fonts(
 
     def typeset(
         source: str, fonts: list[str], packages: str | None = None, *, revision: int = 0
-    ) -> tuple[bytes, list[bytes], list[tuple[str, list[int]]], bool]:
-        raw, shapes, labels, system = native(source, fonts, packages, revision=revision)
+    ) -> tuple[bytes, list[bytes], list[tuple[str, list[int]]], bool, list[str]]:
+        raw, shapes, labels, system, missing = native(
+            source, fonts, packages, revision=revision
+        )
         rows = np.frombuffer(raw).reshape(-1, tc.ROW).copy()
         wide, tall = next((sizes[path] for path in fonts if path in sizes), (1.0, 1.0))
         places = rows[:, tc.PLACEMENT]  # (sx, ky, kx, sy, tx, ty): x's, then y's, apart
         places[:, ::2] *= wide
         places[:, 1::2] *= tall
-        return rows.tobytes(), shapes, labels, system
+        return rows.tobytes(), shapes, labels, system, missing
 
     monkeypatch.setattr(tc, "_CACHE", tc.Path(tmp_path, "layouts"))
     monkeypatch.setattr(tc._engine, "typeset", typeset)

@@ -22,7 +22,8 @@ class Words(m.Scene):
 
 - `font_size` sets the size: 48 unless you give another.
 - `font` sets the font: `"sans-serif"`, `"monospace"`, or the name of a font on your
-  computer. The default is New Computer Modern, the font of LaTeX.
+  computer, any family name it lists, as font menus show them. The default is New Computer
+  Modern, the font of LaTeX. If no font has the name, ManimGX warns and uses the default.
 - `t2c` colors parts of the text: `m.Text("red and blue", t2c={"red": m.RED, "blue": m.BLUE})`.
 
 Text is a mobject like any other: you can move it, scale it, color it and animate it.

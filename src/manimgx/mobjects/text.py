@@ -801,8 +801,9 @@ class Text(Typst):
         text: The text, as written.
         line_spacing: The space between lines, in ems: the baselines are
             `1 + line_spacing` ems apart; -1 for 0.3.
-        font: The font family, or "serif", "sans-serif" or "monospace"; "" for New
-            Computer Modern.
+        font: The font family, by any family name its font lists, or "serif",
+            "sans-serif" or "monospace"; "" for New Computer Modern. A family no font
+            has is warned about, and the text is set in New Computer Modern.
         slant: `NORMAL`, `ITALIC` or `OBLIQUE`.
         weight: A weight by name, from `THIN` through `NORMAL` and `BOLD` to
             `ULTRAHEAVY`; the font's nearest weight is used.

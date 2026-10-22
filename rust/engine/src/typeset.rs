@@ -7,7 +7,7 @@
 //! with y up (Typst's page is y down; the flip is folded in here). Shapes come in page points,
 //! y up. Python scales points to scene units.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -75,11 +75,11 @@ fn setup(font_paths: &[String], packages: Option<&str>, named: &[String], revisi
     }
     let mut fonts = FontStore::new();
     let dirs: Vec<PathBuf> = font_paths.iter().map(PathBuf::from).collect();
-    fonts.extend(cached_scan(&dirs, || dirs.iter().flat_map(|dir| scan(dir)).collect()));
+    fonts.extend(cached_scan(&dirs, || with_family_names(dirs.iter().flat_map(|dir| scan(dir)).collect())));
     fonts.extend(embedded());
     if !named.is_empty() {
         fonts.extend(
-            cached_scan(&font_directories(), || system().collect())
+            cached_scan(&font_directories(), || with_family_names(system().collect()))
                 .into_iter()
                 .filter(|(_, info)| named.contains(&info.family.to_lowercase())),
         );
@@ -116,7 +116,37 @@ impl FontSource for Mapped {
 /// A scanned font as the cache keeps it: where it is, and its info's fields.
 type Cached = (PathBuf, u32, String, FontVariant, FontFlags, Vec<FontAxis>, Coverage);
 /// What made a cached scan, in its file's name: bump it with Typst, or when `Cached` changes.
-const SCAN: &str = "typst-0.15.1";
+const SCAN: &str = "typst-0.15.1-names";
+
+/// Faces found on disk, each also under every other family name its name table lists (its
+/// typographic family, name ID 16, and its family, ID 1, as written, in every language): a font
+/// is found by any name a font menu shows for it. A name that is a face's own family (Typst's:
+/// ID 1 without its style words), or one of Typst's own fonts', finds what it found before.
+fn with_family_names(found: Vec<(FontPath, FontInfo)>) -> Vec<(FontPath, FontInfo)> {
+    let mut own: HashSet<String> = found.iter().map(|(_, info)| info.family.to_lowercase()).collect();
+    own.extend(embedded().map(|(_, info)| info.family.to_lowercase()));
+    let mut all = Vec::with_capacity(found.len());
+    for (path, info) in found {
+        for family in family_names(&path).into_iter().filter(|name| !own.contains(&name.to_lowercase())) {
+            all.push((FontPath { path: path.path.clone(), index: path.index }, FontInfo { family, ..info.clone() }));
+        }
+        all.push((path, info));
+    }
+    all
+}
+
+/// The family names a face's name table lists (IDs 16 and 1, in every language), each once.
+fn family_names(path: &FontPath) -> Vec<String> {
+    let Ok(file) = std::fs::File::open(&path.path) else { return Vec::new() };
+    // SAFETY: a font file is not written while mapped (as fontdb and typst-kit assume)
+    let Ok(map) = (unsafe { memmap2::Mmap::map(&file) }) else { return Vec::new() };
+    let Ok(face) = ttf_parser::Face::parse(&map, path.index) else { return Vec::new() };
+    let families = [ttf_parser::name_id::FAMILY, ttf_parser::name_id::TYPOGRAPHIC_FAMILY];
+    let mut names: Vec<String> = face.names().into_iter().filter(|name| families.contains(&name.name_id)).filter_map(|name| name.to_string()).collect();
+    names.sort_by_key(|name| name.to_lowercase());
+    names.dedup_by_key(|name| name.to_lowercase());
+    names
+}
 
 /// MANIMGX_CACHE_DIR when set, otherwise the current user's native cache or the browser
 /// runtime's private filesystem. A missing native root disables disk reuse, with no shared-temp fallback.
@@ -551,12 +581,22 @@ fn message(diagnostics: &[SourceDiagnostic], doc: &Document) -> String {
         .join("; ")
 }
 
-pub type Layout = (Vec<f64>, Vec<Vec<f64>>, Vec<(String, Vec<usize>)>, bool);
+pub type Layout = (Vec<f64>, Vec<Vec<f64>>, Vec<(String, Vec<usize>)>, bool, Vec<String>);
+
+/// The font families a compilation found no font for, as its warnings name them, each once.
+fn unknown_families(warnings: &[SourceDiagnostic]) -> Vec<String> {
+    let mut families: Vec<String> =
+        warnings.iter().filter_map(|w| w.message.strip_prefix("unknown font family: ")).map(str::to_owned).collect();
+    families.sort();
+    families.dedup();
+    families
+}
 
 /// Typeset `source` with the fonts in `font_paths` and Typst's own (a system font only by its
 /// family's name), and the packages under `packages` besides mitex's (the engine's own): its
 /// items (one row of `ROW` floats each, in document order), its shapes' cubic points and its
-/// labelled groups (a label and the items inside, nested ones too).
+/// labelled groups (a label and the items inside, nested ones too); whether it read a system font;
+/// and the families it names that no font has.
 pub fn typeset(source: String, font_paths: &[String], packages: Option<&str>, revision: u64) -> Result<Layout, String> {
     {
         static COMPILES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -568,23 +608,17 @@ pub fn typeset(source: String, font_paths: &[String], packages: Option<&str>, re
         let lean = setup(font_paths, packages, &[], revision);
         let doc = Document { setup: &lean, main: main.clone() };
         let warned = typst::compile::<PagedDocument>(&doc);
-        let mut named: Vec<String> = warned
-            .warnings
-            .iter()
-            .filter_map(|w| w.message.strip_prefix("unknown font family: "))
-            .map(str::to_owned)
-            .collect();
-        named.sort();
-        named.dedup();
+        let named = unknown_families(&warned.warnings);
         let full;
         let system = !named.is_empty();
-        let (doc, compiled) = if system {
+        let (doc, compiled, missing) = if system {
             full = setup(font_paths, packages, &named, revision);
             let doc = Document { setup: &full, main };
-            let compiled = typst::compile::<PagedDocument>(&doc).output;
-            (doc, compiled)
+            let warned = typst::compile::<PagedDocument>(&doc);
+            let missing = unknown_families(&warned.warnings);
+            (doc, warned.output, missing)
         } else {
-            (doc, warned.output)
+            (doc, warned.output, named)
         };
         // Typst memoizes across documents; forget what the last few hundred didn't use
         if COMPILES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 256 == 255 {
@@ -601,7 +635,7 @@ pub fn typeset(source: String, font_paths: &[String], packages: Option<&str>, re
             around: Vec::new(),
         };
         walk.frame(&page.frame, Transform::identity());
-        Ok((walk.rows, walk.shapes, walk.labels, system))
+        Ok((walk.rows, walk.shapes, walk.labels, system, missing))
     }
 }
 
