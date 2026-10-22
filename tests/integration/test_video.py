@@ -155,6 +155,12 @@ def test_captured_exports_preserve_pixels_and_video_across_pending_draws(
 def test_eviction_preserves_queued_transparency_retries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resource: str, pressed: bool
 ) -> None:
+    # The feeder's cadence, small, so the scene is short: a mark every 4 frames, and every 12
+    # a sweep of what no frame has shown for 8.
+    monkeypatch.setattr(feed, "MARK", 4)
+    monkeypatch.setattr(feed, "KEEP", 8)
+    monkeypatch.setattr(feed, "SWEEP", 12)
+
     class Recurring(m.ThreeDScene):
         def construct(self) -> None:
             rng = np.random.default_rng(4)
@@ -183,9 +189,9 @@ def test_eviction_preserves_queued_transparency_retries(
                 frame = self.film.feeder.frames
                 # Reuse an old upload between the feeder's marks, just before its sweep.
                 # Twelve transparent layers force a retry after that sweep has run.
-                repeated = frame in (5, 235)
+                repeated = frame in (1, 10)
                 for layer in layers:
-                    layer.set_fill(opacity=0.2 if frame == 235 else 1)
+                    layer.set_fill(opacity=0.2 if frame == 10 else 1)
                 if resource in ("points", "mesh"):
                     target.points = points if repeated else rng.uniform(-3, 3, (60, 3))
                 elif resource == "rows":
@@ -206,7 +212,7 @@ def test_eviction_preserves_queued_transparency_retries(
 
             target.add_updater(update)
             self.add(*layers, target)
-            self.wait(9)
+            self.wait(0.6)
 
     reference, swept = tmp_path / "reference.mp4", tmp_path / "swept.mp4"
     with monkeypatch.context() as disabled:
