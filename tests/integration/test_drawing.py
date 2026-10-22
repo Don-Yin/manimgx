@@ -14,7 +14,8 @@ Strokes are drawn as SVG and PostScript define them (h: half the stroke's width)
 A fill covers what its curves enclose (closed by a straight return to their start), however
 far its control points bulge. An image enlarged is reconstructed from its pixels by its
 `resampling_algorithm`: nearest holds each pixel, linear runs straight between pixel centres,
-cubic follows Keys' kernel.
+cubic follows Keys' kernel. An image shrunk shows in each pixel the mean of its own pixels
+that pixel covers, whatever its algorithm and however it is squashed.
 """
 
 from collections.abc import Callable
@@ -238,6 +239,79 @@ def test_an_image_is_reconstructed_by_its_resampling_algorithm(
     columns = np.arange(90, 231, 10)  # between the pixels' centres, at 80 and 240
     t = (columns + 0.5 - 80) / 160
     assert row[columns] == pytest.approx(255 * kernel(t), abs=1.5)
+
+
+NOISE = np.random.default_rng(36).integers(0, 256, (384, 384), dtype=np.uint8)
+"""Gray noise: no two neighboring pixels alike, so a pixel that shows only some of the
+pixels it covers shows something else than their mean."""
+
+
+def _frame(
+    pixels: np.ndarray, size: tuple[float, float], algorithm: Resampling = 3
+) -> np.ndarray:
+    """A gray picture drawn `size` pixels wide and tall at the frame's centre: the frame's
+    red."""
+
+    def drawn(scene: m.Scene) -> None:
+        image = m.ImageMobject(pixels, resampling_algorithm=algorithm)
+        unit = config.frame_height / config.pixel_height  # a pixel, in scene units
+        image.stretch_to_fit_width(size[0] * unit)
+        scene.add(image.stretch_to_fit_height(size[1] * unit))
+
+    return scenes.frames(scenes.scene(drawn))[-1][..., 0].astype(float)
+
+
+def _shrunk(pixels: np.ndarray, algorithm: Resampling = 3) -> np.ndarray:
+    """A picture of 48 x 48 blocks drawn 48 x 48 pixels: what the frame shows of it, but its
+    outermost pixels, which show its edge too."""
+    top, left = (config.pixel_height - 48) // 2, (config.pixel_width - 48) // 2
+    return _frame(pixels, (48, 48), algorithm)[top + 1 : top + 47, left + 1 : left + 47]
+
+
+def _means(pixels: np.ndarray) -> np.ndarray:
+    """The means of the picture's 48 x 48 blocks, but the outermost."""
+    h, w = pixels.shape[0] // 48, pixels.shape[1] // 48
+    return pixels.reshape(48, h, 48, w).mean(axis=(1, 3))[1:-1, 1:-1]
+
+
+@pytest.mark.config(pixel_width=320, pixel_height=180)
+@pytest.mark.parametrize("algorithm", [0, 2, 3], ids=["nearest", "linear", "cubic"])
+@pytest.mark.parametrize("shrink", [1, 2, 3, 4, 8])
+def test_an_image_shrunk_shows_in_each_pixel_the_mean_of_the_pixels_it_covers(
+    shrink: int, algorithm: Resampling
+) -> None:
+    pixels = NOISE[: 48 * shrink, : 48 * shrink]
+    assert np.abs(_shrunk(pixels, algorithm) - _means(pixels)).max() <= 1
+
+
+@pytest.mark.config(pixel_width=320, pixel_height=180)
+@pytest.mark.parametrize("shrink", [5, 6, 7])
+def test_an_image_shrunk_any_amount_shows_nearly_the_mean(shrink: int) -> None:
+    # where a pixel's points on the picture are more than a pixel of it apart, each is the
+    # mean of a cell of its pixels, from its levels of detail, which count whole pixels
+    pixels = NOISE[: 48 * shrink, : 48 * shrink]
+    error = np.abs(_shrunk(pixels) - _means(pixels))
+    assert error.mean() < 4
+    assert error.max() < 20
+
+
+@pytest.mark.config(pixel_width=320, pixel_height=180)
+def test_an_image_squashed_one_way_keeps_its_detail_the_other() -> None:
+    # 8 times as wide as it is drawn, as tall: a pixel shows the mean of the 8 pixels of
+    # its row it covers, and each row its own
+    pixels = NOISE[:48, : 48 * 8]
+    assert np.abs(_shrunk(pixels) - _means(pixels)).max() <= 1
+
+
+@pytest.mark.config(pixel_width=320, pixel_height=180)
+def test_an_image_a_little_smaller_than_its_pixels_is_nearly_as_at_their_size() -> None:
+    # a picture shrinking past its size passes from its reconstruction to the mean of what a
+    # pixel covers over a quarter more of its pixels a pixel: so a line one pixel wide, 2%
+    # smaller, keeps nearly all its light in its pixel, not a quarter less at once
+    line = np.zeros((96, 96), dtype=np.uint8)
+    line[:, 48] = 255  # the column whose centre is the frame's pixel 160's, at its size
+    assert _frame(line, (96, 96), 2)[90, 160] == 255
+    assert _frame(line, (96 / 1.02, 96 / 1.02), 2)[90, 160] > 240
 
 
 def _filled(mob: m.VMobject) -> float:

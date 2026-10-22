@@ -36,7 +36,9 @@ class ImageMobject(MeshMobject):
     larger than its pixels, the picture is reconstructed from them by
     `resampling_algorithm`: by default a smooth cubic through every pixel; linear blends
     neighboring pixels; nearest shows each pixel as a square of its color. Shown smaller,
-    it is sampled, not averaged. The mobject's opacity multiplies its pixels' own.
+    each pixel of the video shows the mean of the picture's pixels it covers, whatever
+    the algorithm, so thin lines and small text stay whole at any size. The mobject's
+    opacity multiplies its pixels' own.
 
     Args:
         filename_or_array: The picture: an image file's path, the file's contents

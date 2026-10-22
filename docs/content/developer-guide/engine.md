@@ -168,7 +168,11 @@ second term only while a shape morphs). The kinds differ only in how their verti
 triangles:
 
 - A point is a disk that faces the camera.
-- A mesh is its triangles, optionally textured.
+- A mesh is its triangles, optionally textured. Where a pixel covers at most one of a
+  texture's pixels, it shows the texture as its image's `resampling_algorithm`
+  reconstructs it; where it covers more, the mean of the pixels it covers, from up to 16
+  points of its footprint, each read from the image's levels of detail (made when the
+  image is uploaded).
 
 Transparent mesh fragments are collected in lists and composited in depth order. Point
 sprites are sorted and drawn between the other geometry's depth layers. Raster sample

@@ -1168,10 +1168,12 @@ impl Gpu {
         let lists = depth.map(|depth| layout("append", &[written(0), written(1), written(2), depth]));
         let slabs = depth.map(|depth| [layout("slab bounds", &[bounds]), layout("slab bounds and depth", &[bounds, depth])]);
         let raster = RasterLayouts { scene: layout("scene", &[view, storage(1), storage(2), storage(4), storage(5), storage(6), storage(7)]), lists, slabs, shadows };
+        // a picture's (and a camera's view's): linear in a level of detail and between two (see `levels`)
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("image"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
         let shadow_compare = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -1355,12 +1357,13 @@ impl Gpu {
                 [(p[0] as u32 * a / 255) as u8, (p[1] as u32 * a / 255) as u8, (p[2] as u32 * a / 255) as u8, p[3]]
             })
             .collect();
+        let (mip_level_count, levels) = levels(width as usize, height as usize, premultiplied);
         let texture = self.device.create_texture_with_data(
             &self.queue,
             &wgpu::TextureDescriptor {
                 label: Some("image"),
                 size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-                mip_level_count: 1,
+                mip_level_count,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: COLOR,
@@ -1368,7 +1371,7 @@ impl Gpu {
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            &premultiplied,
+            &levels,
         );
         let view = texture.create_view(&Default::default());
         self.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -1380,6 +1383,58 @@ impl Gpu {
             ],
         })
     }
+}
+
+/// A picture's levels of detail, as a texture with every mip level takes them: how many, and their RGBA8 pixels one
+/// level after another, level 0 the picture's own. Each level is half the one before each way (rounded down, at least
+/// 1), and each of its pixels the mean of what it covers of the level before: so, as near as 8-bit values round, the
+/// mean of the picture's own pixels it covers (`blend.wgsl`'s `texel_of` reads them where a pixel of the view covers
+/// many). Premultiplied pixels, so a transparent one adds no color.
+fn levels(width: usize, height: usize, picture: Vec<u8>) -> (u32, Vec<u8>) {
+    let sizes: Vec<(usize, usize)> = std::iter::successors(Some((width, height)), |&(w, h)| (w > 1 || h > 1).then(|| ((w / 2).max(1), (h / 2).max(1)))).collect();
+    let mut all = picture;
+    all.reserve_exact(sizes[1..].iter().map(|&(w, h)| w * h * 4).sum());
+    let mut at = 0;
+    for &(w, h) in &sizes[..sizes.len() - 1] {
+        let next = halved(&all[at..at + w * h * 4], w, h);
+        at += w * h * 4;
+        all.extend(next);
+    }
+    (sizes.len() as u32, all)
+}
+
+/// A level of `w` x `h` pixels halved each way (rounded down, at least 1): each pixel the mean of the pixels it covers,
+/// each counting by how much of it is covered (where a side is odd, a pixel straddles two): exact in integers, rounded
+/// to the nearest once.
+fn halved(level: &[u8], w: usize, h: usize) -> Vec<u8> {
+    // a side of n pixels becoming m: pixel j of the half spans [j n, (j + 1) n) in m-ths of a pixel, so it covers pixel
+    // i, [i m, (i + 1) m), by their overlap, and all it covers by n
+    let spans = |n: usize| -> Vec<Vec<(usize, u64)>> {
+        let m = (n / 2).max(1);
+        let span = |j: usize| {
+            let (lo, hi) = (j * n, (j + 1) * n);
+            (lo / m..hi.div_ceil(m)).map(|i| (i, (hi.min((i + 1) * m) - lo.max(i * m)) as u64)).collect()
+        };
+        (0..m).map(span).collect()
+    };
+    let (across, down) = (spans(w), spans(h));
+    let whole = (w * h) as u64;
+    let mut to = Vec::with_capacity(across.len() * down.len() * 4);
+    for ys in &down {
+        for xs in &across {
+            let mut sum = [0u64; 4];
+            for &(y, wy) in ys {
+                for &(x, wx) in xs {
+                    let pixel = &level[(y * w + x) * 4..][..4];
+                    for (s, &v) in sum.iter_mut().zip(pixel) {
+                        *s += wy * wx * u64::from(v);
+                    }
+                }
+            }
+            to.extend(sum.map(|s| ((s + whole / 2) / whole) as u8));
+        }
+    }
+    to
 }
 
 /// Where a view is drawn — the frame, or a texture another view samples (a camera's view) — by
@@ -2895,6 +2950,51 @@ pub(crate) const COUNT_BYTES: u64 = 4;
 
 pub(crate) fn count(bytes: &[u8]) -> u64 {
     bytemuck::pod_read_unaligned::<u32>(&bytes[..4]) as u64
+}
+
+#[cfg(test)]
+mod levels_of_detail {
+    use super::*;
+
+    /// A picture's levels' sizes and pixels, one channel of each (the first).
+    fn levels_of(width: usize, height: usize, picture: &[u8]) -> Vec<(usize, usize, Vec<u8>)> {
+        let (count, all) = levels(width, height, picture.iter().flat_map(|&v| [v, 0, 0, 0]).collect());
+        let (mut w, mut h, mut at, mut out) = (width, height, 0, Vec::new());
+        for _ in 0..count {
+            out.push((w, h, all[at..at + w * h * 4].iter().step_by(4).copied().collect()));
+            at += w * h * 4;
+            (w, h) = ((w / 2).max(1), (h / 2).max(1));
+        }
+        assert_eq!(at, all.len());
+        out
+    }
+
+    #[test]
+    fn a_level_halves_the_one_before_down_to_one_pixel() {
+        let sizes: Vec<(usize, usize)> = levels_of(6, 3, &[0; 18]).iter().map(|&(w, h, _)| (w, h)).collect();
+        assert_eq!(sizes, [(6, 3), (3, 1), (1, 1)]);
+        assert_eq!(levels_of(1, 1, &[7]), [(1, 1, vec![7])]);
+    }
+
+    #[test]
+    fn a_pixel_is_the_mean_of_the_pixels_it_covers() {
+        // even sides: each pixel the mean of 2 x 2, rounded to the nearest
+        let even = levels_of(4, 2, &[0, 10, 200, 201, 20, 30, 100, 100]);
+        assert_eq!(even[1].2, [15, 150]); // 150.25: rounded once, not after each way
+        assert_eq!(even[2].2, [83]); // (15 + 150) / 2, from the level before
+        // an odd side: 5 become 2, each covering 2.5 of them, the middle one split between both
+        let odd = levels_of(5, 1, &[0, 50, 100, 150, 250]);
+        assert_eq!(odd[1].2, [40, 180]); // (2·0 + 2·50 + 100) / 5, (100 + 2·150 + 2·250) / 5
+        // 3 become 1: the mean of all
+        assert_eq!(levels_of(1, 3, &[30, 60, 90])[1].2, [60]);
+    }
+
+    #[test]
+    fn a_transparent_pixel_adds_no_color() {
+        // premultiplied: an opaque red pixel and a transparent one make half-transparent red
+        let (_, all) = levels(2, 1, vec![255, 0, 0, 255, 0, 0, 0, 0]);
+        assert_eq!(&all[8..], [128, 0, 0, 128]);
+    }
 }
 
 #[cfg(test)]

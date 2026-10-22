@@ -502,13 +502,57 @@ fn lit_texel(texel: vec4<f32>, light: f32, opacity: f32) -> vec4<f32> {
     return vec4<f32>(clamp(texel.rgb + light * texel.a, vec3<f32>(0.0), vec3<f32>(texel.a)), texel.a) * opacity;
 }
 
-// A mesh's picture at the fragment: textures are premultiplied; an image is reconstructed by its resampling algorithm:
-// linear (and a camera's view, a colormap) by the sampler, nearest and cubic here.
-fn texel_of(in: Shaded) -> vec4<f32> {
-    if ((in.textured & (NEAREST | CUBIC)) != 0u) {
-        return reconstructed(in.uv, in.textured);
+// The picture at uv, reconstructed from its pixels by an image's resampling algorithm: linear (and a camera's view, a
+// colormap) by the sampler, nearest and cubic here. Textures are premultiplied.
+fn picture(uv: vec2<f32>, kernel: u32) -> vec4<f32> {
+    if ((kernel & (NEAREST | CUBIC)) != 0u) {
+        return reconstructed(uv, kernel);
     }
-    return textureSampleLevel(image, image_sampler, in.uv, 0.0); // (one level)
+    return textureSampleLevel(image, image_sampler, uv, 0.0);
+}
+
+const TAPS: u32 = 16u; // the most points a pixel's mean of a picture is found from
+
+// A mesh's picture at the fragment. Where the pixel covers at most one of the picture's pixels each way, the picture
+// at its centre; where more, the picture's mean over what it covers: the pixel's square as it lies on the picture (uv's
+// derivatives), at the centres of up to TAPS cells, as near square as they can be and no more than it takes for cells
+// one of the picture's pixels wide, each the picture there (reconstructed by its algorithm while there are at most
+// four, linearly among more), or, where a cell is wider, the mean of the pixels it covers (the level of detail whose
+// pixels are as wide, linear between two: `render.rs`'s `levels`). From one of the picture's pixels to a quarter more,
+// it passes from the one to the other, so a picture shrinking past its size changes smoothly. (The derivatives are
+// taken before anything branches.)
+fn texel_of(in: Shaded) -> vec4<f32> {
+    let size = vec2<f32>(textureDimensions(image));
+    let right = dpdx(in.uv); // the step to the next pixel right, on the picture
+    let below = dpdy(in.uv);
+    let across = length(right * size); // in the picture's pixels
+    let down = length(below * size);
+    let share = clamp(4.0 * (max(across, down) - 1.0), 0.0, 1.0); // how much of it the mean is
+    var texel = vec4<f32>(0.0);
+    if (share < 1.0) {
+        texel = picture(in.uv, in.textured);
+    }
+    if (share > 0.0) {
+        // (less a thousandth: what covers a whole number of cells takes no more, though derivatives round)
+        let cell = max(1.0, sqrt(across * down / f32(TAPS)));
+        let rows = clamp(u32(ceil(down / cell - 1e-3)), 1u, TAPS);
+        let columns = clamp(u32(ceil(across / cell - 1e-3)), 1u, TAPS / rows);
+        let level = log2(max(across / f32(columns), down / f32(rows)));
+        let reconstructed_points = level <= 0.0 && rows * columns <= 4u;
+        var sum = vec4<f32>(0.0);
+        for (var j = 0u; j < rows; j++) {
+            for (var i = 0u; i < columns; i++) {
+                let at = in.uv + ((f32(i) + 0.5) / f32(columns) - 0.5) * right + ((f32(j) + 0.5) / f32(rows) - 0.5) * below;
+                if (reconstructed_points) {
+                    sum += picture(at, in.textured);
+                } else {
+                    sum += textureSampleLevel(image, image_sampler, at, max(level, 0.0));
+                }
+            }
+        }
+        texel = mix(texel, sum / f32(rows * columns), share);
+    }
+    return texel;
 }
 
 // A mesh without a material: its colour; a textured one keeps its pixels (lit, if it is: a surface's colormap) and

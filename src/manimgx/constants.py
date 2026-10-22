@@ -260,10 +260,11 @@ START_Y = 20
 """Kept for Manim compatibility; unused."""
 
 type Resampling = Literal[0, 2, 3]
-"""How an image is reconstructed from its pixels where it is drawn larger than they are,
-numbered as the Pillow library numbers its filters: 0, nearest (each pixel a square of
-its color); 2, linear; 3, cubic (Keys' cubic convolution with a = −1/2, Pillow's
-BICUBIC: smooth, and through every pixel)."""
+"""How an image is reconstructed from its pixels where it is drawn larger than they are
+(drawn smaller, it shows their mean, whatever the algorithm), numbered as the Pillow
+library numbers its filters: 0, nearest (each pixel a square of its color); 2, linear;
+3, cubic (Keys' cubic convolution with a = −1/2, Pillow's BICUBIC: smooth, and through
+every pixel)."""
 RESAMPLING_ALGORITHMS: dict[str, Resampling] = {
     "nearest": 0,
     "none": 0,
