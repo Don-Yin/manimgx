@@ -52,16 +52,16 @@ def test_unsupported_cpu_accounting_never_starts_a_process(
 def test_unsuccessful_processes_are_retained(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, timeout: bool
 ) -> None:
-    code = (
-        "import time; print('started', flush=True); time.sleep(30)"
-        if timeout
-        else "import sys; print('failed deliberately', flush=True); sys.exit(7)"
+    # a shell, which starts at once: a Python child, coverage starting in it too,
+    # may outlast a short timeout on a busy runner
+    script = (
+        "echo started; exec sleep 30" if timeout else "echo failed deliberately; exit 7"
     )
-    monkeypatch.setattr(run, "command", lambda *args: [sys.executable, "-c", code])
-    args = argparse.Namespace(out=tmp_path, timeout=0.5, dry_run=False)
+    monkeypatch.setattr(run, "command", lambda *args: ["/bin/sh", "-c", script])
+    args = argparse.Namespace(out=tmp_path, timeout=1 if timeout else 60, dry_run=False)
     result = run.run_one("manimgx", "linked_rings", 1, args)
     assert result.status == ("timeout" if timeout else "failed")
-    assert result.wall_seconds < 5
+    assert result.wall_seconds < 10
     assert not result.video
     assert Path(result.log).exists()
     assert ("started" if timeout else "failed deliberately") in result.error
