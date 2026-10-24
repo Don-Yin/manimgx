@@ -155,6 +155,53 @@ def test_ticks_and_numbers_added_later_follow_the_lines_attributes() -> None:
     assert line.get_unit_vector()[0] == pytest.approx(line.unit_size)
 
 
+@pytest.mark.parametrize(
+    ("x_range", "values", "places"),
+    [
+        ((3.5, 7.5, 1), [3.5, 4.5, 5.5, 6.5, 7.5], 1),  # (was 4 4 6 6 8)
+        ((-7.5, -3.5, 1), [-7.5, -6.5, -5.5, -4.5, -3.5], 1),
+        ((3.25, 5.25, 1), [3.25, 4.25, 5.25], 2),
+        ((0, 4e-5, 1e-5), [0, 1e-5, 2e-5, 3e-5, 4e-5], 5),  # (was 0 0 0 0 0)
+        ((0, 1.2, 0.1 + 0.2), [0, 0.3, 0.6, 0.9, 1.2], 1),  # (not 17 places)
+    ],
+)
+def test_numbers_have_the_places_their_ticks_need(
+    x_range: tuple[float, float, float], values: list[float], places: int
+) -> None:
+    line = m.NumberLine(x_range, include_numbers=True)
+    numbers = list(line.numbers)
+    assert all(isinstance(number, m.DecimalNumber) for number in numbers)
+    numbers = [number for number in numbers if isinstance(number, m.DecimalNumber)]
+    np.testing.assert_allclose(
+        [number.get_value() for number in numbers], values, atol=1e-12
+    )
+    assert [number.num_decimal_places for number in numbers] == [places] * len(values)
+
+
+@pytest.mark.parametrize(
+    ("x_range", "places"),
+    [
+        ((-3.5, 3.5, 1), 0),  # ticks count from 0
+        ((-3.5, 0, 1), 0),
+        ((3, 7.5, 1), 0),  # the end is not a tick
+        ((2.0, 5, 1), 0),
+        ((0, 3, 1.0), 1),  # a whole float step, as before
+        ((0, 3, 1), 0),
+        ((1e20, 3e20, 1e20), 0),
+    ],
+)
+def test_places_are_unchanged_where_ticks_are_whole(
+    x_range: tuple[float, float, float], places: int
+) -> None:
+    line = m.NumberLine(x_range, include_ticks=False)
+    assert line.decimal_number_config == {"num_decimal_places": places}
+
+
+def test_given_places_win_over_the_ranges() -> None:
+    line = m.NumberLine((3.5, 7.5, 1), decimal_number_config={"num_decimal_places": 0})
+    assert line.decimal_number_config == {"num_decimal_places": 0}
+
+
 FUNCTIONS: dict[str, Callable[[float], float]] = {
     "a square": lambda t: t * t,
     "a wave": lambda t: np.sin(3 * t) + t,

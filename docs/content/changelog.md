@@ -45,6 +45,7 @@ The notable changes to ManimGX, release by release. The format follows
 
 ### Fixed
 
+- Number a line's ticks with the decimal places they need: a range on one side of 0 that starts between whole numbers, such as `NumberLine((3.5, 7.5, 1))`, was numbered 4, 4, 6, 6, 8, where its ticks are at 3.5, 4.5, …; a step written with an exponent (`1e-05`) gave no places, and one with round-off (`0.1 + 0.2`) gave 17.
 - Give a type checker the package's names: each module lists the names it gives in `__all__`, and each package takes in its children's and gathers their lists, so `m.Scene`, `m.Text`, `m.config` and every other name are the package's, where they were reported as not exported ([#38](https://github.com/academa-labs/manimgx/issues/38)). `from manimgx import *` binds exactly those names, no longer the package's modules too: `manimgx.typing` took the place of the standard library's `typing`.
 - Redraw a shape that empties with `always_redraw` without a RecursionError, and keep a mobject's updaters off the member its points move into when a transform aligns it, so a relative updater such as `always_shift` no longer runs twice on them ([#32](https://github.com/academa-labs/manimgx/issues/32)).
 - Measure a text's size in `inspect` and `render` at 1080p, which is 1080 px on a video's short side, so a tall video (1080x1920) no longer reports readable text as small ([#37](https://github.com/academa-labs/manimgx/issues/37)).

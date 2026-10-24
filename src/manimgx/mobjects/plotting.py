@@ -727,7 +727,8 @@ class NumberLineOptions(_Tipped, total=False, closed=True):
     """The gap between the line and its numbers, in scene units (default 0.25)."""
     decimal_number_config: DecimalNumberOptions | None
     """[Number keywords][manimgx.DecimalNumber] for the
-    numbers (default None: as many decimal places as the range's step has)."""
+    numbers (default None: as many decimal places as the range's step has, or its
+    start, when the range is all on one side of 0)."""
     numbers_to_exclude: Iterable[float] | None
     """Numbers not to write, when the ticks are numbered (default None: none; an
     axis's leave out 0)."""
@@ -801,7 +802,8 @@ class NumberLine(Line):
         line_to_number_buff: The gap between the line and its numbers, in scene units.
         decimal_number_config: The numbers'
             [number keywords][manimgx.DecimalNumber]; None
-            for as many decimal places as `x_step` has.
+            for as many decimal places as `x_step` has, or the range's start, when
+            the range is all on one side of 0 and its ticks count from there.
         numbers_to_exclude: Numbers not to write, when the ticks are numbered; None
             for none.
         numbers_to_include: The numbers to write, instead of the ticks': given, they
@@ -883,9 +885,15 @@ class NumberLine(Line):
         elif len(x_range) == 2:
             x_range = [*x_range, 1]
         if decimal_number_config is None:
-            decimal_number_config = {
-                "num_decimal_places": self._decimal_places_from_step(x_range[2])
-            }
+            # a whole float step keeps its one place: (0, 3, 1.0) is written 1.0, 2.0
+            places = max(
+                self._decimal_places_of(x_range[2]),
+                int(str(x_range[2]).endswith(".0")),
+            )
+            if 0 < x_range[0] < x_range[1] or x_range[0] < x_range[1] < 0:
+                # ticks count from the start, not from 0 (see get_tick_range)
+                places = max(places, self._decimal_places_of(x_range[0]))
+            decimal_number_config = {"num_decimal_places": places}
         self.x_range = np.array(x_range, dtype=float)
         """The line's range, `[x_min, x_max, x_step]`, as given: of exponents, on a
         logarithmic line."""
@@ -1301,11 +1309,20 @@ class NumberLine(Line):
         return label_constructor(str(label_tex), **kwargs)
 
     @staticmethod
-    def _decimal_places_from_step(step: float) -> int:
-        step_str = str(step)
-        if "." not in step_str:
-            return 0
-        return len(step_str.split(".")[-1])
+    def _decimal_places_of(value: float) -> int:
+        """The decimal places a number is written with, to 15 significant digits.
+
+        Fifteen digits leave out a float's round-off (0.1 + 0.2 has one place) and
+        read an exponent (1e-05 has five); a whole number has none.
+
+        Args:
+            value: The number.
+
+        Returns:
+            How many decimal places it has.
+        """
+        mantissa, _, exponent = f"{value:.15g}".partition("e")
+        return max(0, len(mantissa.partition(".")[2]) - int(exponent or 0))
 
 
 class UnitInterval(NumberLine):
