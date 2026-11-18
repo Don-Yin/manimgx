@@ -173,8 +173,49 @@ def test_a_scene_without_plays_still_gets_a_picture(
     path = source(tmp_path, "self.add(m.Cube())", base="ThreeDScene")
     result = CliRunner().invoke(app, ["inspect", str(path), *times])
     assert result.exit_code == 0, result.output
-    assert "layout: not checked (a 3D scene)" in result.output
+    assert "fixed-in-frame layout: no problems in" in result.output
     assert (tmp_path / "Example.storyboard.png").is_file()
+
+
+@pytest.mark.parametrize(
+    ("command", "times"),
+    [
+        ("inspect", []),
+        ("inspect", ["-t", "end"]),
+        ("inspect", ["-t", "0,end"]),
+        ("render", []),
+    ],
+)
+def test_3d_layout_checks_only_fixed_in_frame_families(
+    tmp_path: Path, command: str, times: list[str]
+) -> None:
+    path = source(
+        tmp_path,
+        "self.set_camera_orientation(phi=1, theta=0.5, gamma=0.2, zoom=3)\n"
+        "self.camera.frame.shift(20 * m.RIGHT)\n"
+        'title = m.Text("Overlay title")\n'
+        'caption = m.Text("Overlay caption").shift(0.15 * m.UP)\n'
+        "overlays = m.VGroup(title)\n"
+        "self.add_fixed_in_frame_mobjects(overlays)\n"
+        "overlays.add(caption)\n"
+        'tiny = m.Text("tiny", font_size=8).shift(2 * m.DOWN)\n'
+        'clipped = m.Text("clipped").set_x(self.camera.frame.width / 2)\n'
+        "self.add_fixed_in_frame_mobjects(tiny, clipped)\n"
+        'self.add(m.Text("World text", font_size=8), m.Square(fill_opacity=1))\n'
+        "self.wait(0.1)",
+        base="ThreeDScene",
+    )
+    result = CliRunner().invoke(app, [command, str(path), *times])
+    assert result.exit_code == (1 if command == "inspect" else 0), result.output
+    assert "fixed-in-frame layout: 3 problems" in result.output
+    assert "title (Text 'Overlay title')" in result.output
+    assert "caption (Text 'Overlay caption')" in result.output
+    assert "texts overlap" in result.output
+    assert "past the right edge" in result.output
+    assert "text is 13 px tall at 1080p" in result.output
+    assert "World text" not in result.output
+    with Image.open(tmp_path / "Example.storyboard.png") as image:
+        assert ((np.array(image) == [255, 64, 64]).all(axis=-1)).any()
 
 
 @pytest.mark.parametrize("time", ["-1", "nan", "inf", "later", ""])

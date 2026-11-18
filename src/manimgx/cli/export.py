@@ -154,8 +154,8 @@ def inspect(
 
     Samples play and wait endings by default. With -t, inspects the frames a video player
     shows at those times; 'end' is the last frame. Checks for clipped content, overlapping
-    text, lines or fills over text, and small labels. 3D scenes get pictures and a timeline;
-    layout checks are skipped. Only sampled moments are checked.
+    text, lines or fills over text, and small labels. In 3D scenes, layout checks cover only
+    fixed-in-frame mobjects, not projected 3D content. Only sampled moments are checked.
 
     Pictures are chronological, captioned #play t=… file:line, with problems outlined and
     numbered. Six fit on each sheet (more go on `<name>-2.png`, …). Default sampling omits
@@ -199,8 +199,7 @@ def inspect(
 
     def ended(made: Scene, play: Play, animations: tuple[Animation, ...]) -> None:
         nonlocal known
-        if not made.three_d:
-            known = names(made, written_frame())
+        known = names(made, written_frame())
         watch.lines.append(line(play, animations))
         if None not in wanted and not pending:
             raise Cut  # the play showing the last frame asked for is over

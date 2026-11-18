@@ -156,10 +156,18 @@ class View:
 def view(scene: Scene, known: Names | None = None) -> View:
     """What the viewer sees now. Names from the running code take precedence over `known`,
     which preserves local names after `construct` returns."""
-    (x0, y0), (x1, y1) = (scene.camera.frame.get_corner(c)[:2] for c in (DL, UR))
-    frame = (float(x0), float(y0), float(x1), float(y1))
+    if scene.three_d:
+        # Fixed-in-frame mobjects use the frame's size, but not its center or orbit.
+        w, h = scene.camera.frame_width / 2, scene.camera.frame_height / 2
+        frame = (-w, -h, w, h)
+    else:
+        (x0, y0), (x1, y1) = (scene.camera.frame.get_corner(c)[:2] for c in (DL, UR))
+        frame = (float(x0), float(y0), float(x1), float(y1))
     w, h = config.frame_width / 2, config.frame_height / 2
-    framed = max(abs(a - b) for a, b in zip(frame, (-w, -h, w, h), strict=True)) > 1e-3
+    framed = (
+        not scene.three_d
+        and max(abs(a - b) for a, b in zip(frame, (-w, -h, w, h), strict=True)) > 1e-3
+    )
     current = names(scene, written_frame())
     if known is not None:
         current = (known[0] | current[0], known[1] | current[1])
@@ -169,6 +177,7 @@ def view(scene: Scene, known: Names | None = None) -> View:
 def seen(scene: Scene, scope: Names) -> list[Thing]:
     """What the viewer sees now, in draw order."""
     named, bare = scope
+    fixed = scene.camera.fixed_in_frame_mobjects if scene.three_d else None
     order = {id(leaf): i for i, leaf in enumerate(scene.display_list())}
     out: list[Thing] = []
 
@@ -187,7 +196,8 @@ def seen(scene: Scene, scope: Names) -> list[Thing]:
 
     def visit(mob: Mobject, chain: list[Mobject]) -> None:
         chain = [*chain, mob]
-        if isinstance(mob, TEXTS):
+        pinned = fixed is None or mob in fixed
+        if pinned and isinstance(mob, TEXTS):
             leaves = [m for m in mob.family_members_with_points() if _visible(m)]
             if not leaves:
                 return
@@ -221,7 +231,8 @@ def seen(scene: Scene, scope: Names) -> list[Thing]:
             )
             return
         if (
-            mob.has_points()
+            pinned
+            and mob.has_points()
             and id(mob) in order
             and isinstance(mob, DRAWN)
             and _visible(mob)

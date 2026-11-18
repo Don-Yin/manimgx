@@ -110,8 +110,9 @@ layout: 2 problems
 
 Each problem names the mobjects as your code names them, such as `title`. The
 storyboard outlines and numbers each problem in red. Layout problems give exit code 1;
-notes, such as a graph continuing off screen, do not. 3D scenes get the pictures and
-timeline, with layout checks marked as skipped.
+notes, such as a graph continuing off screen, do not. In 3D scenes, layout checks cover
+only fixed-in-frame mobjects, not projected 3D content; the report says
+`fixed-in-frame layout`.
 
 To inspect specific moments, including during an animation:
 

@@ -146,16 +146,16 @@ class Watch:
         if made.num_plays > len(made.film.plays):
             index, where = made.num_plays - 1, _written()
         self.three_d = made.three_d
-        seen = None if made.three_d else view(made, known)
-        marked = [] if seen is None else self.layout.see((time, where), seen)
-        self.checked += seen is not None
+        seen = view(made, known)
+        marked = self.layout.see((time, where), seen)
+        self.checked += 1
         rgba = made.film.picture(made.camera, made.display_list())
         picture = tile(rgba, config.pixel_width, config.pixel_height)
         pixels = picture.tobytes()
         if distinct and pixels == self._last:
             return
         self._last = pixels
-        if seen is not None and marked:
+        if marked:
             _mark(picture, seen, marked)
         caption = f"t={float(time):g}s"
         if index is not None:
@@ -167,10 +167,8 @@ class Watch:
     def report(self, *, timeline: bool = True, film: "Film | None" = None) -> str:
         """The timeline (if asked), then the layout, then the sounds the film's end cuts
         short (given the film)."""
-        layout = (
-            "layout: not checked (a 3D scene)"
-            if self.three_d
-            else report(self.layout, self.checked)
+        layout = ("fixed-in-frame " if self.three_d else "") + report(
+            self.layout, self.checked
         )
         cut = [] if film is None else film.cut()
         sounds = [
